@@ -242,6 +242,7 @@
       color: #f5f5f5;
       font-size: 28px;
       line-height: 1;
+      font-family: sans-serif;
       text-shadow: 1px 1px 2px #000, -1px -1px 1px rgba(0, 0, 0, 0.65);
       transform: translate(-50%, -50%);
       pointer-events: none;
@@ -335,6 +336,26 @@
       transform: translateX(-50%);
       pointer-events: none;
     }
+
+    #itemTooltip {
+      position: fixed;
+      left: 50%;
+      bottom: 76px;
+      z-index: 20;
+      display: none;
+      max-width: calc(100vw - 24px);
+      padding: 7px 10px;
+      border: 1px solid rgba(255, 255, 255, 0.35);
+      border-radius: 5px;
+      background: rgba(20, 18, 15, 0.94);
+      color: white;
+      font-size: 13px;
+      text-align: center;
+      transform: translateX(-50%);
+      pointer-events: none;
+    }
+
+    #itemTooltip.visible { display: block; }
     .craftStatus {
       min-height: 1em;
       margin: 7px 0 0;
@@ -449,6 +470,7 @@
   <div id="mineProgress" aria-hidden="true"></div>
   <div id="crosshair" aria-hidden="true"></div>
   <div id="toast" role="status" aria-live="polite"></div>
+  <div id="itemTooltip" role="status" aria-live="polite"></div>
 
   <div id="touchControls" aria-label="Touch game controls">
     <div id="moveStick" class="touch-stick" aria-label="Movement joystick">
@@ -509,6 +531,7 @@
     const mineProgressElement = document.getElementById("mineProgress");
     const coordinatesElement = document.getElementById("coordinates");
     const toastElement = document.getElementById("toast");
+    const itemTooltipElement = document.getElementById("itemTooltip");
     const craftGuideElement = document.getElementById("craftGuide");
 
     let screenWidth = 0;
@@ -740,6 +763,12 @@
       diamond_pickaxe: 6
     };
 
+    const TOOL_TIERS = {
+      ...PICKAXE_TIERS,
+      wood_axe: 1,
+      stone_axe: 2
+    };
+
     const ORE_REQUIRED_TIER = {
       coal: 1,
       copper_ore: 2,
@@ -755,7 +784,7 @@
     }
 
     function isToolType(type) {
-      return type in PICKAXE_TIERS || /_axe$/.test(type);
+      return type in TOOL_TIERS;
     }
 
     function itemIcon(type) {
@@ -766,6 +795,10 @@
     function itemInfoText(type) {
       if (type in PICKAXE_TIERS) {
         return `Pickaxe tier ${PICKAXE_TIERS[type]} of ${Math.max(...Object.values(PICKAXE_TIERS))}`;
+      }
+
+      if (type in TOOL_TIERS) {
+        return `Axe tier ${TOOL_TIERS[type]} of ${Math.max(...Object.values(TOOL_TIERS))}`;
       }
 
       if (type in ORE_REQUIRED_TIER) {
@@ -971,6 +1004,13 @@
     function blockBounds(block) {
       if (block.type === "door" && doorStateFromColor(block.color)) {
         return doorBounds(block);
+      }
+
+      if (block.type === "fence") {
+        return {
+          minX: block.x + 0.25, maxX: block.x + 0.75,
+          minZ: block.z + 0.25, maxZ: block.z + 0.75
+        };
       }
 
       return {
@@ -1257,7 +1297,10 @@
     // Doors are thin, so they do not hide the faces of neighboring blocks.
     function isOpaqueCube(x, y, z) {
       const block = getBlock(x, y, z);
-      return block !== null && block.type !== "door" && block.type !== "water";
+      return block !== null &&
+        block.type !== "door" &&
+        block.type !== "fence" &&
+        block.type !== "water";
     }
 
     addPlacedBlock(-3, terrainHeight(-3, 0), 0, "#d84838");
@@ -1552,6 +1595,57 @@
       }
     }
 
+    let itemTooltipTimer = null;
+    let itemTooltipHideTimer = null;
+
+    function showItemTooltip(text) {
+      window.clearTimeout(itemTooltipHideTimer);
+      itemTooltipElement.textContent = text;
+      itemTooltipElement.classList.add("visible");
+    }
+
+    function hideItemTooltip() {
+      itemTooltipElement.classList.remove("visible");
+    }
+
+    function bindItemTooltip(element, text) {
+      let longPress = false;
+      let startX = 0;
+      let startY = 0;
+
+      element.addEventListener("pointerdown", event => {
+        window.clearTimeout(itemTooltipTimer);
+        window.clearTimeout(itemTooltipHideTimer);
+        longPress = false;
+        startX = event.clientX;
+        startY = event.clientY;
+        itemTooltipTimer = window.setTimeout(() => {
+          longPress = true;
+          showItemTooltip(text);
+        }, 500);
+      });
+
+      element.addEventListener("pointermove", event => {
+        if (
+          Math.hypot(event.clientX - startX, event.clientY - startY) > 12
+        ) {
+          window.clearTimeout(itemTooltipTimer);
+        }
+      });
+
+      element.addEventListener("pointerup", () => {
+        window.clearTimeout(itemTooltipTimer);
+        if (longPress) {
+          itemTooltipHideTimer = window.setTimeout(hideItemTooltip, 1800);
+        }
+      });
+
+      element.addEventListener("pointercancel", () => {
+        window.clearTimeout(itemTooltipTimer);
+        hideItemTooltip();
+      });
+    }
+
     function makeSlot(index) {
       const item = inventory[index];
       const element = document.createElement("div");
@@ -1566,9 +1660,12 @@
       if (item) {
         const itemType = item.type || itemTypeFromColor(item.color);
         const info = itemInfoText(itemType);
-        element.title =
+        const itemText =
           `Slot ${index + 1}: ${itemDisplayName(itemType)} (${item.count})` +
           (info ? ` — ${info}` : "");
+        element.title = itemText;
+        element.setAttribute("aria-label", itemText);
+        bindItemTooltip(element, itemText);
       } else {
         element.title = `Slot ${index + 1}`;
       }
@@ -1581,16 +1678,18 @@
       if (item && item.count > 0) {
         const itemType = item.type || itemTypeFromColor(item.color);
         const icon = itemIcon(itemType);
+        const swatch = document.createElement("span");
+        swatch.className = "slotColor";
+        swatch.style.backgroundColor =
+          ITEM_DEFINITIONS[itemType]?.color || item.color;
+        element.appendChild(swatch);
+
         if (icon) {
           const iconElement = document.createElement("span");
           iconElement.className = "slotIcon";
           iconElement.textContent = icon;
+          iconElement.style.color = ITEM_DEFINITIONS[itemType]?.color || item.color;
           element.appendChild(iconElement);
-        } else {
-          const swatch = document.createElement("span");
-          swatch.className = "slotColor";
-          swatch.style.backgroundColor = item.color;
-          element.appendChild(swatch);
         }
 
         const count = document.createElement("span");
@@ -1665,21 +1764,29 @@
         const item = items[index];
         const element = document.createElement("div");
         element.className = "slot";
-        element.title = item
-          ? `${itemDisplayName(item.type)} (${item.count})`
+        const itemType = item && (item.type || itemTypeFromColor(item.color));
+        const itemText = item
+          ? `Chest slot ${index + 1}: ${itemDisplayName(itemType)} (${item.count})`
           : `Chest slot ${index + 1}`;
+        element.title = itemText;
         if (item) {
-          const icon = itemIcon(item.type || itemTypeFromColor(item.color));
+          element.setAttribute("aria-label", itemText);
+          bindItemTooltip(element, itemText);
+        }
+        if (item) {
+          const icon = itemIcon(itemType);
+          const swatch = document.createElement("span");
+          swatch.className = "slotColor";
+          swatch.style.backgroundColor =
+            ITEM_DEFINITIONS[itemType]?.color || item.color;
+          element.appendChild(swatch);
+
           if (icon) {
             const iconElement = document.createElement("span");
             iconElement.className = "slotIcon";
             iconElement.textContent = icon;
+            iconElement.style.color = ITEM_DEFINITIONS[itemType]?.color || item.color;
             element.appendChild(iconElement);
-          } else {
-            const swatch = document.createElement("span");
-            swatch.className = "slotColor";
-            swatch.style.backgroundColor = item.color;
-            element.appendChild(swatch);
           }
           const count = document.createElement("span");
           count.className = "slotCount";
@@ -2588,6 +2695,8 @@
         };
         color = doorColorFromState(state);
         bounds = doorBounds({ x, y, z, color, type });
+      } else if (type === "fence") {
+        bounds = blockBounds({ x, y, z, color, type });
       }
 
       const overlapsPlayer =
@@ -2673,9 +2782,11 @@
         const block = getBlock(bx, y, bz);
         if (!block) continue;
 
-        // A thin door only supports weight where the panel actually is.
-        if (block.type === "door") {
-          const bounds = doorBounds(block);
+        // Thin blocks only support weight where their geometry actually is.
+        if (block.type === "door" || block.type === "fence") {
+          const bounds = block.type === "door"
+            ? doorBounds(block)
+            : blockBounds(block);
           if (
             x < bounds.minX || x > bounds.maxX ||
             z < bounds.minZ || z > bounds.maxZ
@@ -3140,9 +3251,43 @@
       pushQuad(corners.map(c => [c[0], y0, c[1]]), [0, -1, 0], 0.62);
     }
 
+    function addFenceFaces(faces, block) {
+      const center = [
+        block.x + 0.5,
+        block.y + 0.5,
+        block.z + 0.5
+      ];
+      const halfExtents = [0.25, 0.5, 0.25];
+      const vertices = CUBE_VERTICES.map(([x, y, z]) =>
+        worldToCamera([
+          center[0] + x * halfExtents[0] * 2,
+          center[1] + y * halfExtents[1] * 2,
+          center[2] + z * halfExtents[2] * 2
+        ])
+      );
+
+      for (const face of CUBE_FACES) {
+        if (!faceFacesCamera(center, face.neighbor, halfExtents)) continue;
+
+        const polygon = clipNear(face.ids.map(index => vertices[index]));
+        if (polygon.length < 3) continue;
+
+        faces.push({
+          depth: polygon.reduce((sum, vertex) => sum + vertex[2], 0) / polygon.length,
+          points: polygon,
+          color: shadeColor(block.color, face.shade * worldLight)
+        });
+      }
+    }
+
     function addCubeFaces(faces, block) {
       if (block.type === "door" && doorStateFromColor(block.color)) {
         addDoorFaces(faces, block);
+        return;
+      }
+
+      if (block.type === "fence") {
+        addFenceFaces(faces, block);
         return;
       }
 
