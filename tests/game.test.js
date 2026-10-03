@@ -295,28 +295,61 @@ test("chest stack transfers conserve item counts", () => {
   assert.equal(r.all, 94);
 });
 
-test("non-empty containers cannot be broken and persist locally", () => {
+test("place action opens a targeted chest without placing", () => {
+  const r = run(`(() => {
+    inventory.fill(null);
+    blockEdits.clear();
+    containers.clear();
+    setInventoryOpen(false);
+    camera.pos = [0.5, 0, 0];
+    camera.rot = [0, 0];
+    blockEdits.set(blockKey(0, 1, 0), {
+      x: 0, y: 1, z: 0,
+      color: ITEM_DEFINITIONS.chest.color,
+      type: "chest",
+    });
+    lastSuccessfulPlacementAt = performance.now();
+    activatePlaceAction();
+    const result = {
+      open: inventoryOpen,
+      key: openContainerKey,
+      placed: placedBlocks.has(blockKey(0, 1, 0)),
+    };
+    setInventoryOpen(false);
+    blockEdits.clear();
+    containers.clear();
+    return result;
+  })()`);
+  assert.deepEqual(r, {
+    open: true,
+    key: "0,1,0",
+    placed: false,
+  });
+});
+
+test("breaking a container drops its contents and persists them locally", () => {
   const r = run(`(() => {
     inventory.fill(null);
     blockEdits.set(blockKey(2,0,2), {x:2,y:0,z:2,color:ITEM_DEFINITIONS.chest.color,type:"chest"});
     const c = ensureContainer(2,0,2,"chest");
     c.slots[0] = {type:"coal",color:ITEM_DEFINITIONS.coal.color,count:3};
-    const refused = breakBlockAt(2,0,2) === false;
     saveContainers();
     containers.clear();
     loadContainers();
     const restored = containers.get(blockKey(2,0,2)).slots[0];
-    containers.get(blockKey(2,0,2)).slots[0] = null;
+    inventory.fill(null);
     const broke = breakBlockAt(2,0,2);
-    const drop = inventory[0] && inventory[0].type;
+    const drops = inventory
+      .filter(Boolean)
+      .map((item) => item.type + ":" + item.count)
+      .sort();
     blockEdits.clear(); containers.clear(); inventory.fill(null);
-    return { refused, restored, broke, drop };
+    return { broke, drops, restored };
   })()`);
-  assert.equal(r.refused, true);
+  assert.equal(r.broke, true);
+  assert.deepEqual(r.drops, ["chest:1", "coal:3"]);
   assert.equal(r.restored.type, "coal");
   assert.equal(r.restored.count, 3);
-  assert.equal(r.broke, true);
-  assert.equal(r.drop, "chest");
 });
 
 function craft(id, inv) {

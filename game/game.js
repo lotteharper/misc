@@ -1291,12 +1291,22 @@ function breakBlockAt(x, y, z) {
     return true;
   }
 
-  if (isContainerBlock(block)) {
+  const isContainer = isContainerBlock(block);
+
+  if (isContainer) {
     const container = containers.get(blockKey(x, y, z));
 
-    if (container && !containerIsEmpty(container)) {
+    if (
+      container &&
+      !containerIsEmpty(container) &&
+      !transferContainerContentsToInventory(container, {
+        type: block.type,
+        color: block.color,
+        count: 1,
+      })
+    ) {
       setStatus(
-        `Empty the ${itemDisplayName(block.type)} before breaking it.`,
+        `Inventory full — make room for the ${itemDisplayName(block.type)} contents.`,
       );
       return false;
     }
@@ -1305,6 +1315,7 @@ function breakBlockAt(x, y, z) {
   const dropType = dropTypeForBlock(block);
 
   if (
+    !isContainer &&
     !addToInventory(
       ITEM_DEFINITIONS[dropType]?.color || block.color,
       dropType,
@@ -1503,6 +1514,50 @@ function countItemsIn(items, type) {
 
     return total + (itemType === type ? item.count : 0);
   }, 0);
+}
+
+function transferContainerContentsToInventory(container, droppedItem) {
+  const nextInventory = cloneInventory();
+  const nextSlots = container.slots.map((item) =>
+    item ? { ...item } : null,
+  );
+
+  for (let index = 0; index < nextSlots.length; index += 1) {
+    const item = nextSlots[index];
+
+    if (item) {
+      const count = item.count;
+
+      if (
+        moveStack(nextSlots, index, nextInventory, () => true) !==
+        count
+      ) {
+        return false;
+      }
+    }
+  }
+
+  if (droppedItem) {
+    const count = droppedItem.count;
+
+    if (
+      moveStack(
+        [droppedItem],
+        0,
+        nextInventory,
+        () => true,
+      ) !== count
+    ) {
+      return false;
+    }
+  }
+
+  for (let index = 0; index < inventory.length; index += 1) {
+    inventory[index] = nextInventory[index];
+  }
+
+  container.slots = nextSlots;
+  return true;
 }
 
 function hasRecipeIngredients(recipe) {
@@ -2217,15 +2272,29 @@ function containerStorageKey() {
 function saveContainers() {
   containersDirty = false;
   lastContainerSave = performance.now();
+  const serialized = serializeContainers();
 
   try {
     window.localStorage.setItem(
       containerStorageKey(),
-      serializeContainers(),
+      serialized,
     );
   } catch {
     setStatus(
       "Could not save furnace/chest contents in this browser.",
+    );
+  }
+
+  if (
+    hasLoadedServerState &&
+    worldSocket &&
+    worldSocket.readyState === WebSocket.OPEN
+  ) {
+    worldSocket.send(
+      JSON.stringify({
+        type: "containers",
+        containers: JSON.parse(serialized),
+      }),
     );
   }
 }
@@ -2242,6 +2311,14 @@ function loadContainers() {
   } catch {
     // Local storage may be unavailable; containers then stay in memory.
   }
+}
+
+function applyServerContainers(saved) {
+  if (!saved || typeof saved !== "object") {
+    return;
+  }
+
+  restoreContainers(JSON.stringify(saved));
 }
 
 function ensureContainer(x, y, z, kind) {
@@ -2918,6 +2995,10 @@ function applyWelcome(message) {
     applyServerInventory(message.inventory);
   }
 
+  if (!containersDirty) {
+    applyServerContainers(message.containers);
+  }
+
   applyServerEdits(message.edits);
 
   hasLoadedServerState = true;
@@ -2975,6 +3056,18 @@ function connectWorldSocket() {
 
     if (message.type === "inventory_saved") {
       inventoryDirty = false;
+      return;
+    }
+
+    if (message.type === "containers_saved") {
+      containersDirty = false;
+      return;
+    }
+
+    if (message.type === "containers") {
+      if (!containersDirty) {
+        applyServerContainers(message.containers);
+      }
       return;
     }
 
@@ -3376,6 +3469,21 @@ function placeBlock() {
 
   renderInventory();
   syncInventory();
+}
+
+function activatePlaceAction() {
+  if (inventoryOpen) {
+    return;
+  }
+
+  const hit = raycast();
+
+  if (hit && isContainerBlock(getBlock(...hit.hit))) {
+    openContainerAt(...hit.hit);
+    return;
+  }
+
+  placeBlock();
 }
 
 // =============================================================================
@@ -4396,7 +4504,7 @@ function bindTouchAction(button, action) {
     } else if (action === "mine") {
       startMining("touch");
     } else if (action === "place") {
-      placeBlock();
+      activatePlaceAction();
     }
   });
 
@@ -4608,7 +4716,7 @@ function updateGamepad() {
     }
 
     if (risingEdge("place", place)) {
-      placeBlock();
+      activatePlaceAction();
     }
   }
 
@@ -4694,7 +4802,7 @@ function handlePointerDown(event) {
   if (event.button === 2) {
     startMining("mouse");
   } else if (event.button === 0) {
-    placeBlock();
+    activatePlaceAction();
   }
 
   if (document.pointerLockElement !== canvas) {
