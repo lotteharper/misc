@@ -15,7 +15,8 @@
   <body>
     <div class="hint">
       WASD move · Space jump · Right-click mine (hold 1s) · Left-click place ·
-      E inventory
+      E inventory · Left-click a furnace or chest to open it · Space opens
+      doors
       <span id="controllerStatus">· Controller: not connected</span>
     </div>
 
@@ -24,6 +25,8 @@
     </div>
 
     <canvas id="c"></canvas>
+
+    <div id="gameStatus" role="status" aria-live="polite"></div>
 
     <div id="mineProgress" aria-hidden="true"></div>
     <div id="crosshair" aria-hidden="true"></div>
@@ -64,6 +67,17 @@
       <h2 id="inventoryTitle">Inventory — drag or select a slot</h2>
 
       <div id="inventoryGrid"></div>
+
+      <section id="containerPanel" class="containerPanel" hidden>
+        <h3>
+          <span id="containerTitle">Container</span>
+          <button type="button" class="containerClose" id="containerClose">
+            Close
+          </button>
+        </h3>
+        <div id="containerGrid"></div>
+        <p id="containerInfo" class="containerInfo"></p>
+      </section>
 
       <section class="craftingPanel">
         <h3>Crafting</h3>

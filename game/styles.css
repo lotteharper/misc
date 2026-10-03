@@ -1,0 +1,433 @@
+:root {
+  --slot-size: 48px;
+}
+body,
+html {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: #dce8f2;
+  font-family: sans-serif;
+}
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #dce8f2;
+  touch-action: none;
+}
+.hint {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 5;
+  max-width: calc(100vw - 160px);
+  padding: 7px 9px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.9);
+  font-size: 14px;
+  pointer-events: none;
+}
+#controllerStatus {
+  color: #555;
+}
+#coordinates {
+  position: fixed;
+  top: max(8px, env(safe-area-inset-top));
+  right: 8px;
+  z-index: 5;
+  padding: 7px 9px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #222;
+  font: 12px/1.2 monospace;
+  white-space: nowrap;
+  pointer-events: none;
+}
+#crosshair {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 5;
+  width: 20px;
+  height: 20px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+#crosshair::after,
+#crosshair::before {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  content: "";
+  background: #fff;
+  box-shadow:
+    0 0 2px #000,
+    0 0 4px #000;
+  transform: translate(-50%, -50%);
+}
+#crosshair::before {
+  width: 2px;
+  height: 18px;
+}
+#crosshair::after {
+  width: 18px;
+  height: 2px;
+}
+#mineProgress {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 4;
+  display: none;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: conic-gradient(
+    from -90deg,
+    #31e66b var(--progress, 0deg),
+    transparent var(--progress, 0deg)
+  );
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  -webkit-mask: radial-gradient(farthest-side, transparent 69%, #000 72%);
+  mask: radial-gradient(farthest-side, transparent 69%, #000 72%);
+}
+#hotbar {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  z-index: 6;
+  display: flex;
+  gap: 4px;
+  transform: translateX(-50%);
+}
+#inventoryPanel {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 12;
+  display: none;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 24px);
+  padding: 14px;
+  overflow: auto;
+  border: 2px solid #594c3c;
+  border-radius: 8px;
+  background: rgba(37, 34, 30, 0.96);
+  color: #fff;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+}
+#inventoryPanel.open {
+  display: block;
+}
+#inventoryTitle {
+  margin: 0 0 10px;
+  font-size: 16px;
+  font-weight: 400;
+}
+#inventoryGrid {
+  display: grid;
+  grid-template-columns: repeat(9, var(--slot-size));
+  gap: 4px;
+}
+.slot {
+  position: relative;
+  box-sizing: border-box;
+  width: var(--slot-size);
+  height: var(--slot-size);
+  border: 2px solid #897a65;
+  border-radius: 4px;
+  background: rgba(130, 117, 97, 0.65);
+  cursor: pointer;
+  user-select: none;
+  touch-action: manipulation;
+}
+.slot:hover {
+  border-color: #fff;
+}
+.slot.selected {
+  border-color: #ffe178;
+  box-shadow: 0 0 0 2px rgba(255, 225, 120, 0.45);
+}
+.slot.gamepad-cursor {
+  outline: 3px solid #80e8ff;
+  outline-offset: 2px;
+}
+.slotColor {
+  position: absolute;
+  inset: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  border-radius: 3px;
+  pointer-events: none;
+}
+.slotCount {
+  position: absolute;
+  right: 3px;
+  bottom: 1px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  text-shadow: 1px 1px 2px #000;
+  pointer-events: none;
+}
+.slotNumber {
+  position: absolute;
+  top: 1px;
+  left: 3px;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 11px;
+  text-shadow: 1px 1px 2px #000;
+  pointer-events: none;
+}
+.craftingPanel {
+  width: min(560px, calc(100vw - 60px));
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.35);
+}
+.craftingPanel h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 400;
+}
+#craftingRecipes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
+  gap: 6px;
+}
+.craftButton {
+  min-height: 42px;
+  padding: 6px 8px;
+  border: 1px solid #897a65;
+  border-radius: 4px;
+  background: #51483c;
+  color: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+.craftButton:hover:not(:disabled) {
+  background: #6a5a46;
+  border-color: #ffe178;
+}
+.craftButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.craftStatus {
+  min-height: 1em;
+  margin: 7px 0 0;
+  color: #ffd876;
+  font-size: 12px;
+}
+#touchControls {
+  display: none;
+}
+.touch-stick {
+  position: fixed;
+  bottom: 22px;
+  z-index: 8;
+  box-sizing: border-box;
+  width: 132px;
+  height: 132px;
+  border: 2px solid rgba(255, 255, 255, 0.7);
+  border-radius: 50%;
+  background: rgba(35, 45, 50, 0.32);
+  touch-action: none;
+  user-select: none;
+}
+#moveStick {
+  left: 20px;
+}
+#lookStick {
+  right: 20px;
+}
+.touch-stick-knob {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 54px;
+  height: 54px;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+  background: rgba(225, 235, 240, 0.62);
+  transform: translate(
+    calc(-50% + var(--knob-x, 0)),
+    calc(-50% + var(--knob-y, 0))
+  );
+  pointer-events: none;
+}
+.stick-label {
+  position: absolute;
+  right: 0;
+  bottom: 8px;
+  left: 0;
+  color: #fff;
+  font-size: 10px;
+  text-align: center;
+  text-shadow: 1px 1px 2px #000;
+  pointer-events: none;
+}
+.touch-actions {
+  position: fixed;
+  right: 24px;
+  bottom: 174px;
+  z-index: 9;
+  display: grid;
+  grid-template-columns: repeat(2, 58px);
+  gap: 8px;
+}
+.touch-actions button {
+  min-width: 58px;
+  min-height: 54px;
+  padding: 4px;
+  border: 2px solid rgba(255, 255, 255, 0.8);
+  border-radius: 12px;
+  background: rgba(35, 45, 50, 0.72);
+  color: #fff;
+  font: bold 12px sans-serif;
+  text-shadow: 1px 1px 2px #000;
+  touch-action: none;
+  user-select: none;
+}
+.touch-actions button:active {
+  background: rgba(100, 130, 145, 0.95);
+  transform: scale(0.96);
+}
+@media (pointer: coarse) {
+  :root {
+    --slot-size: min(42px, calc((100vw - 70px) / 9));
+  }
+  #touchControls {
+    display: block;
+  }
+  #hotbar {
+    bottom: 5px;
+    z-index: 10;
+  }
+  .hint {
+    font-size: 12px;
+  }
+}
+@media (pointer: coarse) and (max-width: 420px) {
+  .touch-stick {
+    width: 112px;
+    height: 112px;
+  }
+  #moveStick {
+    left: 12px;
+  }
+  #lookStick {
+    right: 12px;
+  }
+  .touch-actions {
+    right: 14px;
+    bottom: 144px;
+  }
+  .slotColor {
+    inset: 6px;
+  }
+}
+
+#gameStatus {
+  position: fixed;
+  bottom: 74px;
+  left: 50%;
+  z-index: 7;
+  max-width: calc(100vw - 32px);
+  padding: 6px 12px;
+  border-radius: 4px;
+  background: rgba(37, 34, 30, 0.88);
+  color: #ffd876;
+  font-size: 13px;
+  text-align: center;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+#gameStatus:empty {
+  display: none;
+}
+
+.tierInfo {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #cfc6b8;
+  font-size: 12px;
+}
+
+.craftButton .craftNote {
+  display: block;
+  color: #ffd876;
+  font-size: 11px;
+}
+
+.containerPanel {
+  width: min(560px, calc(100vw - 60px));
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+.containerPanel[hidden] {
+  display: none;
+}
+
+.containerPanel h3 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 400;
+}
+
+.containerPanel button.containerClose {
+  padding: 2px 8px;
+  border: 1px solid #897a65;
+  border-radius: 4px;
+  background: #51483c;
+  color: #fff;
+  cursor: pointer;
+}
+
+#containerGrid {
+  display: grid;
+  grid-template-columns: repeat(9, var(--slot-size));
+  gap: 4px;
+}
+
+#containerGrid.furnace {
+  grid-template-columns: repeat(3, var(--slot-size)) 1fr;
+  align-items: center;
+}
+
+.slotLabel {
+  position: absolute;
+  top: 1px;
+  left: 3px;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 9px;
+  text-shadow: 1px 1px 2px #000;
+  pointer-events: none;
+}
+
+.furnaceProgress {
+  padding-left: 8px;
+  font-size: 12px;
+  color: #cfc6b8;
+}
+
+.furnaceProgress progress {
+  width: 100%;
+}
+
+.containerInfo {
+  margin: 7px 0 0;
+  color: #cfc6b8;
+  font-size: 12px;
+}
