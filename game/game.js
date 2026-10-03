@@ -3286,19 +3286,17 @@ function placeBlock() {
   }
 
   const now = performance.now();
+  const hit = raycast();
+
+  if (hit && isContainerBlock(getBlock(...hit.hit))) {
+    openContainerAt(...hit.hit);
+    return;
+  }
 
   if (
     now - lastSuccessfulPlacementAt <
     PLACE_COOLDOWN_MS
   ) {
-    return;
-  }
-
-  const hit = raycast();
-
-  if (hit && isContainerBlock(getBlock(...hit.hit))) {
-    lastSuccessfulPlacementAt = now;
-    openContainerAt(...hit.hit);
     return;
   }
 
