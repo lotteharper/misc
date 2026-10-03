@@ -252,6 +252,9 @@ function terrainColor(y) {
 
 const MAX_STACK = 64;
 
+// The server only stores block colors, so every item/block color must be
+// unique: block types are recovered from colors on reload.
+
 // Mining tiers: the number is the tier of the tool, 0 being bare hands.
 const TOOL_TIER_PREFIXES = [
   "",
