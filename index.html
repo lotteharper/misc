@@ -1635,6 +1635,7 @@
       element.addEventListener("pointerdown", event => {
         window.clearTimeout(itemTooltipTimer);
         window.clearTimeout(itemTooltipHideTimer);
+        hideItemTooltip();
         longPress = false;
         startX = event.clientX;
         startY = event.clientY;
@@ -1659,9 +1660,18 @@
         }
       });
 
+      element.addEventListener("pointerleave", () => {
+        window.clearTimeout(itemTooltipTimer);
+        if (!longPress) hideItemTooltip();
+      });
+
       element.addEventListener("pointercancel", () => {
         window.clearTimeout(itemTooltipTimer);
         hideItemTooltip();
+      });
+
+      element.addEventListener("contextmenu", event => {
+        event.preventDefault();
       });
     }
 
@@ -1680,7 +1690,8 @@
         const itemType = item.type || itemTypeFromColor(item.color);
         const info = itemInfoText(itemType);
         const itemText =
-          `Slot ${index + 1}: ${itemDisplayName(itemType)} (${item.count})` +
+          `Slot ${index + 1}: Type: ${itemDisplayName(itemType)} (${itemType}), ` +
+          `${item.count} available` +
           (info ? ` — ${info}` : "");
         element.title = itemText;
         element.setAttribute("aria-label", itemText);
