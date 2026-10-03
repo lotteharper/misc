@@ -1025,7 +1025,7 @@
         return doorBounds(block);
       }
 
-      if (block.type === "fence") {
+      if (block.type === "fence" || block.type === "torch") {
         return {
           minX: block.x + 0.25, maxX: block.x + 0.75,
           minZ: block.z + 0.25, maxZ: block.z + 0.75
@@ -2728,7 +2728,7 @@
         };
         color = doorColorFromState(state);
         bounds = doorBounds({ x, y, z, color, type });
-      } else if (type === "fence") {
+      } else if (type === "fence" || type === "torch") {
         bounds = blockBounds({ x, y, z, color, type });
       }
 
@@ -3308,7 +3308,10 @@
         faces.push({
           depth: polygon.reduce((sum, vertex) => sum + vertex[2], 0) / polygon.length,
           points: polygon,
-          color: shadeColor(block.color, face.shade * worldLight)
+          color: shadeColor(
+            block.color,
+            face.shade * (block.type === "torch" ? Math.max(worldLight, 0.85) : worldLight)
+          )
         });
       }
     }
@@ -3319,7 +3322,7 @@
         return;
       }
 
-      if (block.type === "fence") {
+      if (block.type === "fence" || block.type === "torch") {
         addFenceFaces(faces, block);
         return;
       }
