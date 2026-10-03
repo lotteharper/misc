@@ -1328,6 +1328,7 @@ function breakBlockAt(x, y, z) {
   if (isContainerBlock(block)) {
     containers.delete(blockKey(x, y, z));
     containersDirty = true;
+    saveContainers();
 
     if (openContainerKey === blockKey(x, y, z)) {
       closeContainer();
@@ -2270,7 +2271,6 @@ function containerStorageKey() {
 }
 
 function saveContainers() {
-  containersDirty = false;
   lastContainerSave = performance.now();
   const serialized = serializeContainers();
 
@@ -2296,6 +2296,8 @@ function saveContainers() {
         containers: JSON.parse(serialized),
       }),
     );
+  } else {
+    containersDirty = true;
   }
 }
 
@@ -3034,6 +3036,19 @@ function applyWelcome(message) {
     );
   }
 
+  if (
+    containersDirty &&
+    worldSocket &&
+    worldSocket.readyState === WebSocket.OPEN
+  ) {
+    worldSocket.send(
+      JSON.stringify({
+        type: "containers",
+        containers: JSON.parse(serializeContainers()),
+      }),
+    );
+  }
+
   sendPlayerPosition();
 }
 
@@ -3131,6 +3146,9 @@ function connectWorldSocket() {
 
   worldSocket.addEventListener("close", () => {
     hasLoadedServerState = false;
+    if (containers.size > 0) {
+      containersDirty = true;
+    }
     stopMining();
 
     window.setTimeout(connectWorldSocket, 2000);
