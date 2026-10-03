@@ -196,6 +196,21 @@
       font-weight: normal;
     }
 
+    #inventorySelectionTooltip {
+      display: none;
+      box-sizing: border-box;
+      margin: -2px 0 10px;
+      padding: 8px 10px;
+      border: 1px solid #ffe178;
+      border-radius: 6px;
+      background: rgba(255, 225, 120, 0.16);
+      color: #ffe9a3;
+      font-size: 13px;
+      font-weight: bold;
+      line-height: 1.3;
+      text-align: center;
+    }
+
     #inventoryGrid {
       display: grid;
       grid-template-columns: repeat(9, var(--slot-size));
@@ -444,6 +459,7 @@
       #touchControls { display: block; }
       #hotbar { bottom: 5px; z-index: 10; }
       .hint { font-size: 12px; }
+      #inventorySelectionTooltip { display: block; }
     }
 
     @media (pointer: coarse) and (max-width: 420px) {
@@ -495,6 +511,7 @@
 
   <div id="inventoryPanel">
     <h2 id="inventoryTitle">Inventory — drag or select a slot</h2>
+    <div id="inventorySelectionTooltip" role="status" aria-live="polite"></div>
     <div id="inventoryGrid"></div>
     <section class="craftingPanel">
       <h3>Crafting</h3>
@@ -532,6 +549,8 @@
     const coordinatesElement = document.getElementById("coordinates");
     const toastElement = document.getElementById("toast");
     const itemTooltipElement = document.getElementById("itemTooltip");
+    const inventorySelectionTooltipElement =
+      document.getElementById("inventorySelectionTooltip");
     const craftGuideElement = document.getElementById("craftGuide");
 
     let screenWidth = 0;
@@ -1743,6 +1762,20 @@
     }
 
     function renderInventory() {
+      const selectedItem = inventory[selectedSlot];
+      if (selectedItem && selectedItem.count > 0) {
+        const selectedType =
+          selectedItem.type || itemTypeFromColor(selectedItem.color);
+        const selectedInfo = itemInfoText(selectedType);
+        inventorySelectionTooltipElement.textContent =
+          `Selected item: ${itemDisplayName(selectedType)} ` +
+          `(type: ${selectedType}, ${selectedItem.count} available)` +
+          (selectedInfo ? ` — ${selectedInfo}` : "");
+      } else {
+        inventorySelectionTooltipElement.textContent =
+          "Selected item: Empty inventory slot";
+      }
+
       hotbarElement.replaceChildren();
       inventoryGrid.replaceChildren();
 
