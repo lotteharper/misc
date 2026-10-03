@@ -524,7 +524,7 @@
   <div id="chestPanel" class="inventoryPanel">
     <h2 id="chestTitle">Chest</h2>
     <div id="chestGrid"></div>
-    <p class="craftStatus">Click a slot to swap it with your selected hotbar slot. Press Escape to close.</p>
+    <p class="craftStatus">Click a slot to swap it with your selected hotbar slot. Press Escape to release the pointer.</p>
   </div>
 
   <script>
@@ -713,7 +713,7 @@
     // stone line (y < -4). The bottom layer is never carved by caves.
     const WORLD_MIN_Y = -24;
     const STONE_LINE_Y = -4;
-    const RENDER_RADIUS = 24;
+    const RENDER_RADIUS = 18;
 
     const PLAYER_HALF_WIDTH = 0.28;
     const PLAYER_HEIGHT = 1.7;
@@ -3582,7 +3582,8 @@
       }
 
       if (event.code === "Escape" && chestOpen) {
-        setChestOpen(false);
+        event.preventDefault();
+        document.exitPointerLock?.();
         return;
       }
 
@@ -3639,7 +3640,7 @@
         if (!wasChestOpen && chestOpen) event.stopPropagation();
       }
 
-      if (document.pointerLockElement !== canvas) {
+      if (!chestOpen && document.pointerLockElement !== canvas) {
         canvas.requestPointerLock?.();
       }
     });
