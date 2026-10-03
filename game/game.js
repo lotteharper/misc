@@ -16,12 +16,22 @@ const craftStatusElement = document.getElementById("craftStatus");
 const controllerStatus = document.getElementById("controllerStatus");
 const mineProgressElement = document.getElementById("mineProgress");
 const coordinatesElement = document.getElementById("coordinates");
+const statusElement = document.getElementById("gameStatus");
+const containerPanel = document.getElementById("containerPanel");
+const containerTitleElement =
+  document.getElementById("containerTitle");
+const containerGrid = document.getElementById("containerGrid");
+const containerInfoElement =
+  document.getElementById("containerInfo");
+const containerCloseButton =
+  document.getElementById("containerClose");
 
 // =============================================================================
 // CONSTANTS
 // =============================================================================
 
-const WORLD_MIN_Y = -10;
+const WORLD_MIN_Y = -24;
+const WORLD_SEED = 123456;
 const RENDER_RADIUS = 16;
 
 const PLAYER_HALF_WIDTH = 0.28;
@@ -123,7 +133,7 @@ function gradient(hash, x, y) {
   }
 }
 
-const permutation = createPermutation(123456);
+const permutation = createPermutation(WORLD_SEED);
 
 function perlin2(x, y) {
   const x0 = Math.floor(x);
@@ -168,7 +178,7 @@ function smoothstep(start, end, value) {
   return normalized * normalized * (3 - 2 * normalized);
 }
 
-function terrainHeight(x, z) {
+function computeTerrainHeight(x, z) {
   let value = 0;
   let amplitude = 1;
   let frequency = 1;
@@ -210,6 +220,24 @@ function terrainHeight(x, z) {
   );
 }
 
+const terrainHeightCache = new Map();
+
+function terrainHeight(x, z) {
+  const key = `${x},${z}`;
+  let height = terrainHeightCache.get(key);
+
+  if (height === undefined) {
+    if (terrainHeightCache.size > 200000) {
+      terrainHeightCache.clear();
+    }
+
+    height = computeTerrainHeight(x, z);
+    terrainHeightCache.set(key, height);
+  }
+
+  return height;
+}
+
 function terrainColor(y) {
   if (y < -4) return "#655244";
   if (y < 0) return "#826344";
@@ -221,6 +249,20 @@ function terrainColor(y) {
 // =============================================================================
 // ITEMS, BLOCKS, AND DOORS
 // =============================================================================
+
+const MAX_STACK = 64;
+
+// The server only stores block colors, so every item/block color must be
+// unique: block types are recovered from colors on reload.
+
+// Mining tiers: the number is the tier of the tool, 0 being bare hands.
+const TOOL_TIER_PREFIXES = [
+  "",
+  "wood",
+  "stone",
+  "copper",
+  "iron",
+];
 
 const ITEM_DEFINITIONS = {
   log: {
@@ -247,21 +289,88 @@ const ITEM_DEFINITIONS = {
     name: "Leaves",
     color: "#32853b",
   },
+  coal: {
+    name: "Coal",
+    color: "#25262a",
+    placeable: false,
+  },
+  raw_copper: {
+    name: "Raw Copper",
+    color: "#d98b5b",
+    placeable: false,
+  },
+  raw_iron: {
+    name: "Raw Iron",
+    color: "#d3b8a4",
+    placeable: false,
+  },
+  raw_gold: {
+    name: "Raw Gold",
+    color: "#f0d24c",
+    placeable: false,
+  },
+  copper_ingot: {
+    name: "Copper Ingot",
+    color: "#e0773d",
+    placeable: false,
+  },
+  iron_ingot: {
+    name: "Iron Ingot",
+    color: "#d8dde3",
+    placeable: false,
+  },
+  gold_ingot: {
+    name: "Gold Ingot",
+    color: "#ffd83a",
+    placeable: false,
+  },
   wood_pickaxe: {
     name: "Wood Pickaxe",
     color: "#d9ad55",
+    tool: { kind: "pickaxe", tier: 1 },
+    placeable: false,
   },
   stone_pickaxe: {
     name: "Stone Pickaxe",
     color: "#98a4b5",
+    tool: { kind: "pickaxe", tier: 2 },
+    placeable: false,
+  },
+  copper_pickaxe: {
+    name: "Copper Pickaxe",
+    color: "#c4673a",
+    tool: { kind: "pickaxe", tier: 3 },
+    placeable: false,
+  },
+  iron_pickaxe: {
+    name: "Iron Pickaxe",
+    color: "#c5ccd3",
+    tool: { kind: "pickaxe", tier: 4 },
+    placeable: false,
   },
   wood_axe: {
     name: "Wood Axe",
     color: "#bf8d43",
+    tool: { kind: "axe", tier: 1 },
+    placeable: false,
   },
   stone_axe: {
     name: "Stone Axe",
     color: "#687b91",
+    tool: { kind: "axe", tier: 2 },
+    placeable: false,
+  },
+  copper_axe: {
+    name: "Copper Axe",
+    color: "#b35a31",
+    tool: { kind: "axe", tier: 3 },
+    placeable: false,
+  },
+  iron_axe: {
+    name: "Iron Axe",
+    color: "#aeb7c0",
+    tool: { kind: "axe", tier: 4 },
+    placeable: false,
   },
   door: {
     name: "Door",
@@ -271,6 +380,14 @@ const ITEM_DEFINITIONS = {
     name: "Fence",
     color: "#a97843",
   },
+  furnace: {
+    name: "Furnace",
+    color: "#5c5f66",
+  },
+  chest: {
+    name: "Chest",
+    color: "#8c5a1e",
+  },
 };
 
 const DOOR_BLOCK_COLORS = {
@@ -278,6 +395,64 @@ const DOOR_BLOCK_COLORS = {
   door_top_closed: "#9a6837",
   door_bottom_open: "#9a6838",
   door_top_open: "#9a6839",
+};
+
+// Ore blocks only exist in generated terrain; mining one drops `drop`.
+const ORE_BLOCKS = {
+  coal_ore: {
+    name: "Coal Ore",
+    color: "#4b4e55",
+    drop: "coal",
+    minTier: 1,
+    hardness: 2,
+  },
+  copper_ore: {
+    name: "Copper Ore",
+    color: "#a0805f",
+    drop: "raw_copper",
+    minTier: 2,
+    hardness: 2.5,
+  },
+  iron_ore: {
+    name: "Iron Ore",
+    color: "#a89483",
+    drop: "raw_iron",
+    minTier: 3,
+    hardness: 3,
+  },
+  gold_ore: {
+    name: "Gold Ore",
+    color: "#c9b24a",
+    drop: "raw_gold",
+    minTier: 4,
+    hardness: 3.5,
+  },
+};
+
+const TOOL_TIER_SPEED = [1, 1.6, 2.2, 3, 4];
+const MIN_MINE_DURATION_MS = 150;
+
+const CONTAINER_KINDS = ["furnace", "chest"];
+
+const SMELT_TIME_MS = 5000;
+
+const SMELTING_RECIPES = {
+  raw_copper: "copper_ingot",
+  raw_iron: "iron_ingot",
+  raw_gold: "gold_ingot",
+};
+
+// Milliseconds of smelting a single fuel item provides.
+const FUEL_BURN_MS = {
+  coal: 40000,
+  log: 10000,
+  planks: 5000,
+};
+
+const FURNACE_SLOTS = {
+  input: 0,
+  fuel: 1,
+  output: 2,
 };
 
 const CRAFTING_RECIPES = [
@@ -328,6 +503,30 @@ const CRAFTING_RECIPES = [
     },
   },
   {
+    id: "copper_pickaxe",
+    label: "Copper Pickaxe",
+    ingredients: {
+      copper_ingot: 3,
+      sticks: 2,
+    },
+    output: {
+      type: "copper_pickaxe",
+      count: 1,
+    },
+  },
+  {
+    id: "iron_pickaxe",
+    label: "Iron Pickaxe",
+    ingredients: {
+      iron_ingot: 3,
+      sticks: 2,
+    },
+    output: {
+      type: "iron_pickaxe",
+      count: 1,
+    },
+  },
+  {
     id: "wood_axe",
     label: "Wood Axe",
     ingredients: {
@@ -348,6 +547,30 @@ const CRAFTING_RECIPES = [
     },
     output: {
       type: "stone_axe",
+      count: 1,
+    },
+  },
+  {
+    id: "copper_axe",
+    label: "Copper Axe",
+    ingredients: {
+      copper_ingot: 3,
+      sticks: 2,
+    },
+    output: {
+      type: "copper_axe",
+      count: 1,
+    },
+  },
+  {
+    id: "iron_axe",
+    label: "Iron Axe",
+    ingredients: {
+      iron_ingot: 3,
+      sticks: 2,
+    },
+    output: {
+      type: "iron_axe",
       count: 1,
     },
   },
@@ -374,6 +597,28 @@ const CRAFTING_RECIPES = [
       count: 3,
     },
   },
+  {
+    id: "furnace",
+    label: "Furnace",
+    ingredients: {
+      stone: 8,
+    },
+    output: {
+      type: "furnace",
+      count: 1,
+    },
+  },
+  {
+    id: "chest",
+    label: "Chest",
+    ingredients: {
+      planks: 8,
+    },
+    output: {
+      type: "chest",
+      count: 1,
+    },
+  },
 ];
 
 function itemTypeFromColor(color) {
@@ -390,6 +635,20 @@ function itemTypeFromColor(color) {
   return `block:${normalizedColor}`;
 }
 
+// Items from older saves (or the server) may lack a type or carry an
+// unknown one; fall back to the color so they migrate safely.
+function resolveItemType(item) {
+  if (
+    typeof item?.type === "string" &&
+    (ITEM_DEFINITIONS[item.type] ||
+      /^block:#[0-9a-f]{6}$/.test(item.type))
+  ) {
+    return item.type;
+  }
+
+  return itemTypeFromColor(item?.color);
+}
+
 function worldBlockTypeFromColor(color) {
   const normalizedColor = String(color || "").toLowerCase();
 
@@ -401,11 +660,21 @@ function worldBlockTypeFromColor(color) {
     }
   }
 
+  for (const [type, ore] of Object.entries(ORE_BLOCKS)) {
+    if (ore.color === normalizedColor) {
+      return type;
+    }
+  }
+
   return itemTypeFromColor(normalizedColor);
 }
 
 function itemDisplayName(type) {
-  return ITEM_DEFINITIONS[type]?.name || "Block";
+  return (
+    ITEM_DEFINITIONS[type]?.name ||
+    ORE_BLOCKS[type]?.name ||
+    "Block"
+  );
 }
 
 function isDoorBlock(block) {
@@ -414,6 +683,122 @@ function isDoorBlock(block) {
 
 function isOpenDoorBlock(block) {
   return Boolean(block?.type?.endsWith("_open"));
+}
+
+function isContainerBlock(block) {
+  return CONTAINER_KINDS.includes(block?.type);
+}
+
+// =============================================================================
+// MINING TIERS
+// =============================================================================
+
+function toolOf(item) {
+  if (!item) {
+    return null;
+  }
+
+  return ITEM_DEFINITIONS[resolveItemType(item)]?.tool || null;
+}
+
+function blockProperties(block) {
+  const type = block?.type || "";
+  const ore = ORE_BLOCKS[type];
+
+  if (ore) {
+    return {
+      tool: "pickaxe",
+      minTier: ore.minTier,
+      hardness: ore.hardness,
+    };
+  }
+
+  if (type === "stone" || type === "furnace") {
+    return { tool: "pickaxe", minTier: 0, hardness: 1.5 };
+  }
+
+  if (
+    type === "log" ||
+    type === "planks" ||
+    type === "leaves" ||
+    type === "fence" ||
+    type === "chest" ||
+    type.startsWith("door_")
+  ) {
+    return { tool: "axe", minTier: 0, hardness: 1 };
+  }
+
+  return { tool: null, minTier: 0, hardness: 1 };
+}
+
+function effectiveToolTier(item, properties) {
+  const tool = toolOf(item);
+
+  return tool && tool.kind === properties.tool ? tool.tier : 0;
+}
+
+function canHarvest(block, item) {
+  const properties = blockProperties(block);
+
+  return effectiveToolTier(item, properties) >= properties.minTier;
+}
+
+function requirementText(block) {
+  const { minTier } = blockProperties(block);
+  const toolType = `${TOOL_TIER_PREFIXES[minTier]}_pickaxe`;
+
+  return `Requires ${itemDisplayName(toolType)} or better`;
+}
+
+function miningDurationMs(block, item) {
+  const properties = blockProperties(block);
+  const tier = effectiveToolTier(item, properties);
+
+  return Math.max(
+    MIN_MINE_DURATION_MS,
+    (MINE_DURATION_MS * properties.hardness) /
+      TOOL_TIER_SPEED[tier],
+  );
+}
+
+function dropTypeForBlock(block) {
+  return ORE_BLOCKS[block.type]?.drop || block.type;
+}
+
+function toolDescription(type) {
+  const tool = ITEM_DEFINITIONS[type]?.tool;
+
+  if (!tool) {
+    return "";
+  }
+
+  if (tool.kind === "axe") {
+    return `Axe tier ${tool.tier}: chops wood faster`;
+  }
+
+  const ores = Object.values(ORE_BLOCKS)
+    .filter((ore) => ore.minTier <= tool.tier)
+    .map((ore) => ore.name)
+    .join(", ");
+
+  return (
+    `Pickaxe tier ${tool.tier}: mines faster` +
+    (ores ? `; can harvest ${ores}` : "")
+  );
+}
+
+function recipeNote(recipe) {
+  const type = recipe.output.type;
+
+  if (type === "furnace") {
+    return "Place it, then click it to smelt ore";
+  }
+
+  if (type === "chest") {
+    return "Place it, then click it to store items";
+  }
+
+  return toolDescription(type);
 }
 
 // =============================================================================
@@ -546,6 +931,182 @@ function generatedTreeBlock(x, y, z) {
   return null;
 }
 
+// =============================================================================
+// CAVES AND ORES
+// =============================================================================
+
+// Caves never come closer to the surface than this many blocks, so they
+// stay below trees and the terrain height model.
+const CAVE_ROOF_THICKNESS = 5;
+const STONE_TOP_Y = -5;
+const TUNNEL_WIDTH = 0.075;
+const CHAMBER_THRESHOLD = 0.78;
+
+function hash3(x, y, z, salt) {
+  let h = (WORLD_SEED ^ Math.imul(salt + 1, 0x9e3779b1)) | 0;
+
+  h = Math.imul(h ^ x, 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h ^ y, 0xc2b2ae35);
+  h ^= h >>> 16;
+  h = Math.imul(h ^ z, 0x27d4eb2f);
+  h ^= h >>> 15;
+  h = Math.imul(h, 0x165667b1);
+
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
+function valueNoise3(x, y, z, salt) {
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const z0 = Math.floor(z);
+  const fx = x - x0;
+  const fy = y - y0;
+  const fz = z - z0;
+  const u = fx * fx * (3 - 2 * fx);
+  const v = fy * fy * (3 - 2 * fy);
+  const w = fz * fz * (3 - 2 * fz);
+
+  const corner = (dx, dy, dz) =>
+    hash3(x0 + dx, y0 + dy, z0 + dz, salt) / 4294967296;
+
+  return lerp(
+    lerp(
+      lerp(corner(0, 0, 0), corner(1, 0, 0), u),
+      lerp(corner(0, 1, 0), corner(1, 1, 0), u),
+      v,
+    ),
+    lerp(
+      lerp(corner(0, 0, 1), corner(1, 0, 1), u),
+      lerp(corner(0, 1, 1), corner(1, 1, 1), u),
+      v,
+    ),
+    w,
+  );
+}
+
+function isCaveCell(x, y, z, surface) {
+  if (
+    y < WORLD_MIN_Y + 2 ||
+    y > surface - CAVE_ROOF_THICKNESS
+  ) {
+    return false;
+  }
+
+  if (valueNoise3(x / 24, y / 12, z / 24, 3) > CHAMBER_THRESHOLD) {
+    return true;
+  }
+
+  const first = valueNoise3(x / 16, y / 9, z / 16, 1);
+
+  if (Math.abs(first - 0.5) > TUNNEL_WIDTH) {
+    return false;
+  }
+
+  const second = valueNoise3(x / 16, y / 9, z / 16, 2);
+
+  return Math.abs(second - 0.5) <= TUNNEL_WIDTH;
+}
+
+const ORE_CELL_SIZE = [6, 4, 6];
+
+// Ore deposits are small blobs: each 6x4x6 cell may hold one deposit whose
+// type depends on a hash of the cell and on its depth.
+function oreTypeAt(x, y, z) {
+  if (y > STONE_TOP_Y) {
+    return null;
+  }
+
+  const cellX = Math.floor(x / ORE_CELL_SIZE[0]);
+  const cellY = Math.floor(y / ORE_CELL_SIZE[1]);
+  const cellZ = Math.floor(z / ORE_CELL_SIZE[2]);
+  const hash = hash3(cellX, cellY, cellZ, 11);
+  const roll = hash % 100;
+  const midY = cellY * ORE_CELL_SIZE[1] + 2;
+
+  let type = null;
+
+  if (roll < 4 && midY <= -14) {
+    type = "gold_ore";
+  } else if (roll < 12 && midY <= -10) {
+    type = "iron_ore";
+  } else if (roll < 24) {
+    type = "copper_ore";
+  } else if (roll < 44) {
+    type = "coal_ore";
+  }
+
+  if (!type) {
+    return null;
+  }
+
+  const centerX =
+    cellX * ORE_CELL_SIZE[0] + 1 + ((hash >>> 8) % 4);
+  const centerY =
+    cellY * ORE_CELL_SIZE[1] + 1 + ((hash >>> 12) % 2);
+  const centerZ =
+    cellZ * ORE_CELL_SIZE[2] + 1 + ((hash >>> 16) % 4);
+
+  const distance =
+    (x - centerX) ** 2 +
+    (y - centerY) ** 2 +
+    (z - centerZ) ** 2;
+
+  if (distance > 3 || hash3(x, y, z, 12) % 100 >= 80) {
+    return null;
+  }
+
+  return type;
+}
+
+const generatedBlockCache = new Map();
+
+function generateTerrainBlock(x, y, z, surface) {
+  if (isCaveCell(x, y, z, surface)) {
+    return null;
+  }
+
+  const oreType = oreTypeAt(x, y, z);
+
+  if (oreType) {
+    return {
+      x,
+      y,
+      z,
+      color: ORE_BLOCKS[oreType].color,
+      type: oreType,
+    };
+  }
+
+  const isStone = y <= STONE_TOP_Y;
+
+  return {
+    x,
+    y,
+    z,
+    color: isStone
+      ? ITEM_DEFINITIONS.stone.color
+      : terrainColor(y),
+    type: isStone ? "stone" : "dirt",
+  };
+}
+
+function getTerrainBlock(x, y, z, surface) {
+  const key = blockKey(x, y, z);
+  let block = generatedBlockCache.get(key);
+
+  if (block === undefined) {
+    if (generatedBlockCache.size > 250000) {
+      generatedBlockCache.clear();
+    }
+
+    block = generateTerrainBlock(x, y, z, surface);
+    generatedBlockCache.set(key, block);
+  }
+
+  return block;
+}
+
 function getBlock(x, y, z) {
   const key = blockKey(x, y, z);
 
@@ -573,18 +1134,10 @@ function getBlock(x, y, z) {
     return placedBlock;
   }
 
-  if (y >= WORLD_MIN_Y && y < terrainHeight(x, z)) {
-    const isStone = y < -4;
+  const surface = terrainHeight(x, z);
 
-    return {
-      x,
-      y,
-      z,
-      color: isStone
-        ? ITEM_DEFINITIONS.stone.color
-        : terrainColor(y),
-      type: isStone ? "stone" : "dirt",
-    };
+  if (y >= WORLD_MIN_Y && y < surface) {
+    return getTerrainBlock(x, y, z, surface);
   }
 
   return generatedTreeBlock(x, y, z);
@@ -728,6 +1281,7 @@ function breakBlockAt(x, y, z) {
         "door",
       )
     ) {
+      setStatus("Inventory full — make room first.");
       return false;
     }
 
@@ -737,13 +1291,36 @@ function breakBlockAt(x, y, z) {
     return true;
   }
 
+  if (isContainerBlock(block)) {
+    const container = containers.get(blockKey(x, y, z));
+
+    if (container && !containerIsEmpty(container)) {
+      setStatus(
+        `Empty the ${itemDisplayName(block.type)} before breaking it.`,
+      );
+      return false;
+    }
+  }
+
+  const dropType = dropTypeForBlock(block);
+
   if (
     !addToInventory(
-      block.color,
-      block.type || itemTypeFromColor(block.color),
+      ITEM_DEFINITIONS[dropType]?.color || block.color,
+      dropType,
     )
   ) {
+    setStatus("Inventory full — make room first.");
     return false;
+  }
+
+  if (isContainerBlock(block)) {
+    containers.delete(blockKey(x, y, z));
+    containersDirty = true;
+
+    if (openContainerKey === blockKey(x, y, z)) {
+      closeContainer();
+    }
   }
 
   removeBlock(x, y, z);
@@ -840,7 +1417,7 @@ function inventoryPayload() {
   return inventory.map((item) =>
     item
       ? {
-          type: item.type || itemTypeFromColor(item.color),
+          type: resolveItemType(item),
           color: item.color,
           count: item.count,
         }
@@ -872,7 +1449,7 @@ function addToInventory(
   let slotIndex = inventory.findIndex(
     (item) =>
       item &&
-      (item.type || itemTypeFromColor(item.color)) === type &&
+      (resolveItemType(item)) === type &&
       item.count < 64,
   );
 
@@ -909,7 +1486,7 @@ function countInventoryItem(type) {
     }
 
     const itemType =
-      item.type || itemTypeFromColor(item.color);
+      resolveItemType(item);
 
     return total + (itemType === type ? item.count : 0);
   }, 0);
@@ -922,7 +1499,7 @@ function countItemsIn(items, type) {
     }
 
     const itemType =
-      item.type || itemTypeFromColor(item.color);
+      resolveItemType(item);
 
     return total + (itemType === type ? item.count : 0);
   }, 0);
@@ -953,7 +1530,7 @@ function consumeIngredientsFrom(items, ingredients) {
 
       if (
         !item ||
-        (item.type || itemTypeFromColor(item.color)) !== type
+        (resolveItemType(item)) !== type
       ) {
         continue;
       }
@@ -994,7 +1571,7 @@ function addCraftedItemTo(items, type, count) {
 
     if (
       !item ||
-      (item.type || itemTypeFromColor(item.color)) !== type ||
+      (resolveItemType(item)) !== type ||
       item.count >= 64
     ) {
       continue;
@@ -1062,6 +1639,22 @@ function craftRecipe(recipe) {
 function renderCraftingRecipes() {
   craftingRecipesElement.replaceChildren();
 
+  const tierInfo = document.createElement("p");
+
+  tierInfo.className = "tierInfo";
+  tierInfo.textContent =
+    "Mining tiers — " +
+    Object.values(ORE_BLOCKS)
+      .map(
+        (ore) =>
+          `${ore.name}: ${itemDisplayName(
+            `${TOOL_TIER_PREFIXES[ore.minTier]}_pickaxe`,
+          )}`,
+      )
+      .join(" · ") +
+    ". Smelt raw ore in a furnace to get ingots for copper and iron tools.";
+  craftingRecipesElement.appendChild(tierInfo);
+
   for (const recipe of CRAFTING_RECIPES) {
     const ingredients = Object.entries(recipe.ingredients)
       .map(
@@ -1076,6 +1669,16 @@ function renderCraftingRecipes() {
     button.className = "craftButton";
     button.textContent = `${recipe.label} — ${ingredients}`;
     button.disabled = !hasRecipeIngredients(recipe);
+
+    const note = recipeNote(recipe);
+
+    if (note) {
+      const noteElement = document.createElement("span");
+
+      noteElement.className = "craftNote";
+      noteElement.textContent = note;
+      button.appendChild(noteElement);
+    }
 
     button.addEventListener("click", () => {
       craftRecipe(recipe);
@@ -1102,8 +1705,11 @@ function makeSlot(index) {
   slot.draggable = true;
   slot.title = item
     ? `Slot ${index + 1}: ` +
-      `${itemDisplayName(item.type || itemTypeFromColor(item.color))} ` +
-      `(${item.count})`
+      `${itemDisplayName(resolveItemType(item))} ` +
+      `(${item.count})` +
+      (toolDescription(resolveItemType(item))
+        ? ` — ${toolDescription(resolveItemType(item))}`
+        : "")
     : `Slot ${index + 1}`;
 
   const slotNumber = document.createElement("span");
@@ -1130,6 +1736,11 @@ function makeSlot(index) {
   }
 
   slot.addEventListener("click", () => {
+    if (openContainerKey && inventoryOpen) {
+      moveInventoryToContainer(index);
+      return;
+    }
+
     if (index < 9) {
       selectedSlot = index;
       gamepadInventoryCursor = index;
@@ -1165,9 +1776,14 @@ function makeSlot(index) {
   slot.addEventListener("drop", (event) => {
     event.preventDefault();
 
-    const sourceIndex = Number(
-      event.dataTransfer.getData("text/plain"),
-    );
+    const data = event.dataTransfer.getData("text/plain");
+
+    if (data.startsWith("c:")) {
+      dropContainerStackOnInventory(data, index);
+      return;
+    }
+
+    const sourceIndex = Number(data);
 
     if (
       !Number.isInteger(sourceIndex) ||
@@ -1208,6 +1824,821 @@ function renderInventory() {
   }
 
   renderCraftingRecipes();
+  renderContainerPanel();
+}
+
+// =============================================================================
+// STATUS MESSAGES
+// =============================================================================
+
+let statusTimer = null;
+let statusExpiresAt = 0;
+
+function setStatus(message) {
+  if (!statusElement) {
+    return;
+  }
+
+  const now = performance.now();
+
+  if (
+    statusElement.textContent === message &&
+    statusExpiresAt - now > 1500
+  ) {
+    return;
+  }
+
+  statusElement.textContent = message;
+  statusExpiresAt = now + 3000;
+
+  window.clearTimeout(statusTimer);
+  statusTimer = window.setTimeout(() => {
+    statusElement.textContent = "";
+  }, 3000);
+}
+
+// =============================================================================
+// STACK TRANSFERS
+// =============================================================================
+
+// Moves as much of `source[sourceIndex]` as fits into `target`, merging into
+// matching stacks first. Counts are conserved: whatever does not fit stays
+// in the source slot. Returns the number of items moved.
+function moveStack(
+  source,
+  sourceIndex,
+  target,
+  accepts = () => true,
+) {
+  const item = source[sourceIndex];
+
+  if (!item || item.count <= 0) {
+    return 0;
+  }
+
+  const type = resolveItemType(item);
+  const startCount = item.count;
+
+  for (
+    let index = 0;
+    index < target.length && item.count > 0;
+    index += 1
+  ) {
+    const existing = target[index];
+
+    if (
+      !existing ||
+      resolveItemType(existing) !== type ||
+      existing.count >= MAX_STACK ||
+      !accepts(index, item)
+    ) {
+      continue;
+    }
+
+    const amount = Math.min(MAX_STACK - existing.count, item.count);
+
+    existing.count += amount;
+    item.count -= amount;
+  }
+
+  for (
+    let index = 0;
+    index < target.length && item.count > 0;
+    index += 1
+  ) {
+    if (target[index] || !accepts(index, item)) {
+      continue;
+    }
+
+    const amount = Math.min(MAX_STACK, item.count);
+
+    target[index] = { type, color: item.color, count: amount };
+    item.count -= amount;
+  }
+
+  if (item.count <= 0) {
+    source[sourceIndex] = null;
+  }
+
+  return startCount - item.count;
+}
+
+// Moves a stack onto a specific slot: into an empty slot, merged into a
+// matching stack, or swapped with a different stack when both sides allow it.
+function moveStackToSlot(
+  source,
+  sourceIndex,
+  target,
+  targetIndex,
+  targetAccepts = () => true,
+  sourceAccepts = () => true,
+) {
+  const item = source[sourceIndex];
+
+  if (
+    !item ||
+    item.count <= 0 ||
+    (source === target && sourceIndex === targetIndex) ||
+    !targetAccepts(targetIndex, item)
+  ) {
+    return 0;
+  }
+
+  const destination = target[targetIndex];
+
+  if (!destination) {
+    target[targetIndex] = item;
+    source[sourceIndex] = null;
+    return item.count;
+  }
+
+  if (resolveItemType(destination) === resolveItemType(item)) {
+    const amount = Math.min(
+      MAX_STACK - destination.count,
+      item.count,
+    );
+
+    destination.count += amount;
+    item.count -= amount;
+
+    if (item.count <= 0) {
+      source[sourceIndex] = null;
+    }
+
+    return amount;
+  }
+
+  if (!sourceAccepts(sourceIndex, destination)) {
+    return 0;
+  }
+
+  target[targetIndex] = item;
+  source[sourceIndex] = destination;
+
+  return item.count;
+}
+
+// =============================================================================
+// FURNACES AND CHESTS
+// =============================================================================
+
+const containers = new Map();
+
+let openContainerKey = null;
+let containersDirty = false;
+let lastContainerSave = 0;
+let lastFurnaceTick = Date.now();
+let furnaceProgressElement = null;
+let furnaceInfoElement = null;
+let renderedContainerSignature = "";
+
+function createContainer(kind) {
+  return {
+    kind,
+    slots: Array.from(
+      { length: kind === "chest" ? 27 : 3 },
+      () => null,
+    ),
+    burn: 0,
+    progress: 0,
+  };
+}
+
+function containerAccepts(container, slotIndex, item) {
+  if (container.kind === "chest") {
+    return true;
+  }
+
+  const type = resolveItemType(item);
+
+  if (slotIndex === FURNACE_SLOTS.input) {
+    return Boolean(SMELTING_RECIPES[type]);
+  }
+
+  if (slotIndex === FURNACE_SLOTS.fuel) {
+    return Boolean(FUEL_BURN_MS[type]);
+  }
+
+  return false;
+}
+
+function containerIsEmpty(container) {
+  return container.slots.every((item) => !item);
+}
+
+function furnaceOutputFor(furnace) {
+  const input = furnace.slots[FURNACE_SLOTS.input];
+
+  if (!input) {
+    return null;
+  }
+
+  const outputType = SMELTING_RECIPES[resolveItemType(input)];
+  const output = furnace.slots[FURNACE_SLOTS.output];
+
+  if (
+    !outputType ||
+    (output &&
+      (resolveItemType(output) !== outputType ||
+        output.count >= MAX_STACK))
+  ) {
+    return null;
+  }
+
+  return outputType;
+}
+
+// Advances a furnace by `elapsedMs`. Fuel is lit only when smelting needs it
+// and burns only while smelting, so results depend solely on the contents.
+function tickFurnace(furnace, elapsedMs) {
+  let remaining = Math.max(0, Number(elapsedMs) || 0);
+  let changed = false;
+
+  while (remaining > 1e-9) {
+    const outputType = furnaceOutputFor(furnace);
+
+    if (!outputType) {
+      if (furnace.progress !== 0) {
+        furnace.progress = 0;
+        changed = true;
+      }
+
+      break;
+    }
+
+    if (furnace.burn <= 1e-9) {
+      const fuel = furnace.slots[FURNACE_SLOTS.fuel];
+      const burnTime = fuel
+        ? FUEL_BURN_MS[resolveItemType(fuel)]
+        : 0;
+
+      if (!burnTime) {
+        break;
+      }
+
+      fuel.count -= 1;
+
+      if (fuel.count <= 0) {
+        furnace.slots[FURNACE_SLOTS.fuel] = null;
+      }
+
+      furnace.burn = burnTime;
+      changed = true;
+    }
+
+    const step = Math.min(
+      remaining,
+      furnace.burn,
+      SMELT_TIME_MS - furnace.progress,
+    );
+
+    furnace.burn -= step;
+    furnace.progress += step;
+    remaining -= step;
+    changed = true;
+
+    if (furnace.progress >= SMELT_TIME_MS - 1e-9) {
+      const input = furnace.slots[FURNACE_SLOTS.input];
+      const output = furnace.slots[FURNACE_SLOTS.output];
+
+      input.count -= 1;
+
+      if (input.count <= 0) {
+        furnace.slots[FURNACE_SLOTS.input] = null;
+      }
+
+      if (output) {
+        output.count += 1;
+      } else {
+        furnace.slots[FURNACE_SLOTS.output] = {
+          type: outputType,
+          color: ITEM_DEFINITIONS[outputType].color,
+          count: 1,
+        };
+      }
+
+      furnace.progress = 0;
+    }
+  }
+
+  return changed;
+}
+
+function sanitizeStoredItem(item) {
+  const type = resolveItemType(item);
+  const definition = ITEM_DEFINITIONS[type];
+
+  if (
+    !definition ||
+    !Number.isInteger(item?.count) ||
+    item.count < 1 ||
+    item.count > MAX_STACK
+  ) {
+    return null;
+  }
+
+  return { type, color: definition.color, count: item.count };
+}
+
+function serializeContainers() {
+  const data = {};
+
+  for (const [key, container] of containers) {
+    data[key] = {
+      kind: container.kind,
+      slots: container.slots.map((item) =>
+        item
+          ? { type: resolveItemType(item), count: item.count }
+          : null,
+      ),
+      burn: container.burn,
+      progress: container.progress,
+    };
+  }
+
+  return JSON.stringify({ version: 1, savedAt: Date.now(), data });
+}
+
+function restoreContainers(text, now = Date.now()) {
+  containers.clear();
+
+  let parsed;
+
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return;
+  }
+
+  if (!parsed || typeof parsed.data !== "object" || !parsed.data) {
+    return;
+  }
+
+  const elapsed = Math.max(0, now - (Number(parsed.savedAt) || now));
+
+  for (const [key, saved] of Object.entries(parsed.data)) {
+    if (
+      !/^-?\d+,-?\d+,-?\d+$/.test(key) ||
+      !CONTAINER_KINDS.includes(saved?.kind)
+    ) {
+      continue;
+    }
+
+    const container = createContainer(saved.kind);
+
+    for (
+      let index = 0;
+      index < container.slots.length;
+      index += 1
+    ) {
+      container.slots[index] = sanitizeStoredItem(
+        saved.slots?.[index],
+      );
+    }
+
+    if (container.kind === "furnace") {
+      container.burn = Math.max(0, Number(saved.burn) || 0);
+      container.progress = Math.min(
+        SMELT_TIME_MS - 1,
+        Math.max(0, Number(saved.progress) || 0),
+      );
+
+      tickFurnace(container, elapsed);
+    }
+
+    containers.set(key, container);
+  }
+}
+
+function containerStorageKey() {
+  return `voxelGame.containers.v1.${roomName}`;
+}
+
+function saveContainers() {
+  containersDirty = false;
+  lastContainerSave = performance.now();
+
+  try {
+    window.localStorage.setItem(
+      containerStorageKey(),
+      serializeContainers(),
+    );
+  } catch {
+    setStatus(
+      "Could not save furnace/chest contents in this browser.",
+    );
+  }
+}
+
+function loadContainers() {
+  try {
+    const text = window.localStorage.getItem(
+      containerStorageKey(),
+    );
+
+    if (text) {
+      restoreContainers(text);
+    }
+  } catch {
+    // Local storage may be unavailable; containers then stay in memory.
+  }
+}
+
+function ensureContainer(x, y, z, kind) {
+  const key = blockKey(x, y, z);
+  const existing = containers.get(key);
+
+  if (existing && existing.kind === kind) {
+    return existing;
+  }
+
+  if (existing && !containerIsEmpty(existing)) {
+    return existing;
+  }
+
+  const container = createContainer(kind);
+
+  containers.set(key, container);
+  containersDirty = true;
+
+  return container;
+}
+
+function getOpenContainer() {
+  return openContainerKey ? containers.get(openContainerKey) : null;
+}
+
+function updateFurnaces() {
+  const now = Date.now();
+  const elapsed = now - lastFurnaceTick;
+
+  lastFurnaceTick = now;
+
+  for (const container of containers.values()) {
+    if (
+      container.kind === "furnace" &&
+      tickFurnace(container, elapsed)
+    ) {
+      containersDirty = true;
+    }
+  }
+
+  if (openContainerKey) {
+    const [x, y, z] = openContainerKey.split(",").map(Number);
+    const container = containers.get(openContainerKey);
+
+    if (
+      !container ||
+      getBlock(x, y, z)?.type !== container.kind
+    ) {
+      closeContainer();
+    } else if (
+      containerSignature(container) !== renderedContainerSignature
+    ) {
+      renderContainerPanel();
+    } else {
+      updateFurnaceProgress(container);
+    }
+  }
+
+  if (containersDirty && performance.now() - lastContainerSave > 2000) {
+    saveContainers();
+  }
+}
+
+function containerSignature(container) {
+  return container.slots
+    .map((item) =>
+      item ? `${resolveItemType(item)}:${item.count}` : "-",
+    )
+    .join("|");
+}
+
+function updateFurnaceProgress(container) {
+  if (!furnaceProgressElement || container.kind !== "furnace") {
+    return;
+  }
+
+  furnaceProgressElement.value = container.progress;
+
+  if (furnaceInfoElement) {
+    furnaceInfoElement.textContent =
+      container.burn > 0
+        ? `Burning: ${Math.ceil(container.burn / 1000)}s of fuel lit`
+        : "Not burning";
+  }
+}
+
+function afterContainerChange() {
+  containersDirty = true;
+  saveContainers();
+  renderInventory();
+  syncInventory();
+}
+
+function openContainerAt(x, y, z) {
+  const block = getBlock(x, y, z);
+
+  if (!isContainerBlock(block)) {
+    return false;
+  }
+
+  ensureContainer(x, y, z, block.type);
+
+  setInventoryOpen(true);
+  openContainerKey = blockKey(x, y, z);
+
+  renderInventory();
+  setStatus(`Opened ${itemDisplayName(block.type)}.`);
+
+  return true;
+}
+
+function closeContainer() {
+  openContainerKey = null;
+  renderContainerPanel();
+}
+
+function containerFullMessage(container) {
+  return container.kind === "furnace"
+    ? "Furnace takes raw ore as input and coal, wood or planks as fuel."
+    : "Chest is full.";
+}
+
+function moveInventoryToContainer(index) {
+  const container = getOpenContainer();
+  const item = inventory[index];
+
+  if (!container || !item) {
+    return;
+  }
+
+  const total = item.count;
+  const moved = moveStack(
+    inventory,
+    index,
+    container.slots,
+    (slotIndex, candidate) =>
+      containerAccepts(container, slotIndex, candidate),
+  );
+
+  if (moved === 0) {
+    setStatus(containerFullMessage(container));
+    return;
+  }
+
+  if (moved < total) {
+    setStatus(`Only moved ${moved} of ${total}.`);
+  }
+
+  afterContainerChange();
+}
+
+function moveContainerToInventory(slotIndex) {
+  const container = getOpenContainer();
+  const item = container?.slots[slotIndex];
+
+  if (!item) {
+    return;
+  }
+
+  const total = item.count;
+  const moved = moveStack(container.slots, slotIndex, inventory);
+
+  if (moved === 0) {
+    setStatus("Inventory full — make room first.");
+    return;
+  }
+
+  if (moved < total) {
+    setStatus(
+      `Inventory full — took ${moved} of ${total}; the rest stays.`,
+    );
+  }
+
+  afterContainerChange();
+}
+
+function takeAllFromContainer() {
+  const container = getOpenContainer();
+
+  if (!container) {
+    return;
+  }
+
+  let left = 0;
+
+  for (let index = 0; index < container.slots.length; index += 1) {
+    if (container.slots[index]) {
+      moveStack(container.slots, index, inventory);
+
+      if (container.slots[index]) {
+        left += 1;
+      }
+    }
+  }
+
+  setStatus(
+    left > 0
+      ? "Inventory full — some items stay in the container."
+      : "Took everything.",
+  );
+
+  afterContainerChange();
+}
+
+function dropOnContainerSlot(data, targetIndex) {
+  const container = getOpenContainer();
+
+  if (!container) {
+    return;
+  }
+
+  const accepts = (slotIndex, item) =>
+    containerAccepts(container, slotIndex, item);
+  let moved = 0;
+
+  if (data.startsWith("c:")) {
+    const sourceIndex = Number(data.slice(2));
+
+    if (!Number.isInteger(sourceIndex)) {
+      return;
+    }
+
+    moved = moveStackToSlot(
+      container.slots,
+      sourceIndex,
+      container.slots,
+      targetIndex,
+      accepts,
+      accepts,
+    );
+  } else {
+    const sourceIndex = Number(data);
+
+    if (!Number.isInteger(sourceIndex)) {
+      return;
+    }
+
+    moved = moveStackToSlot(
+      inventory,
+      sourceIndex,
+      container.slots,
+      targetIndex,
+      accepts,
+    );
+  }
+
+  if (moved === 0) {
+    setStatus(containerFullMessage(container));
+    return;
+  }
+
+  afterContainerChange();
+}
+
+function dropContainerStackOnInventory(data, targetIndex) {
+  const container = getOpenContainer();
+  const sourceIndex = Number(data.slice(2));
+
+  if (!container || !Number.isInteger(sourceIndex)) {
+    return;
+  }
+
+  const moved = moveStackToSlot(
+    container.slots,
+    sourceIndex,
+    inventory,
+    targetIndex,
+    () => true,
+    (slotIndex, candidate) =>
+      containerAccepts(container, slotIndex, candidate),
+  );
+
+  if (moved === 0) {
+    setStatus("That slot can't take that item.");
+    return;
+  }
+
+  afterContainerChange();
+}
+
+function makeContainerSlot(container, index, label) {
+  const item = container.slots[index];
+  const slot = document.createElement("div");
+
+  slot.className = "slot";
+  slot.draggable = true;
+  slot.title = item
+    ? `${itemDisplayName(resolveItemType(item))} (${item.count}) — ` +
+      "click to move to your inventory"
+    : label || `Slot ${index + 1}`;
+
+  if (label) {
+    const labelElement = document.createElement("span");
+
+    labelElement.className = "slotLabel";
+    labelElement.textContent = label;
+    slot.appendChild(labelElement);
+  }
+
+  if (item && item.count > 0) {
+    const color = document.createElement("span");
+
+    color.className = "slotColor";
+    color.style.backgroundColor = item.color;
+    slot.appendChild(color);
+
+    const count = document.createElement("span");
+
+    count.className = "slotCount";
+    count.textContent = String(item.count);
+    slot.appendChild(count);
+  }
+
+  slot.addEventListener("click", () => {
+    moveContainerToInventory(index);
+  });
+
+  slot.addEventListener("dragstart", (event) => {
+    event.dataTransfer.setData("text/plain", `c:${index}`);
+  });
+
+  slot.addEventListener("dragover", (event) => {
+    event.preventDefault();
+  });
+
+  slot.addEventListener("drop", (event) => {
+    event.preventDefault();
+    dropOnContainerSlot(
+      event.dataTransfer.getData("text/plain"),
+      index,
+    );
+  });
+
+  return slot;
+}
+
+function renderContainerPanel() {
+  furnaceProgressElement = null;
+  furnaceInfoElement = null;
+
+  if (!containerPanel) {
+    return;
+  }
+
+  const container = getOpenContainer();
+
+  containerPanel.hidden = !container;
+  containerGrid.replaceChildren();
+  containerGrid.classList.remove("furnace");
+
+  if (!container) {
+    renderedContainerSignature = "";
+    return;
+  }
+
+  renderedContainerSignature = containerSignature(container);
+
+  containerTitleElement.textContent =
+    container.kind === "furnace" ? "Furnace" : "Chest";
+
+  if (container.kind === "furnace") {
+    containerGrid.classList.add("furnace");
+
+    ["Input", "Fuel", "Output"].forEach((label, index) => {
+      containerGrid.appendChild(
+        makeContainerSlot(container, index, label),
+      );
+    });
+
+    const progress = document.createElement("div");
+
+    progress.className = "furnaceProgress";
+
+    furnaceProgressElement = document.createElement("progress");
+    furnaceProgressElement.max = SMELT_TIME_MS;
+
+    furnaceInfoElement = document.createElement("div");
+
+    progress.append(furnaceProgressElement, furnaceInfoElement);
+    containerGrid.appendChild(progress);
+
+    updateFurnaceProgress(container);
+
+    containerInfoElement.textContent =
+      "Input: raw copper/iron/gold. Fuel: coal, wood or planks. " +
+      "Click a stack to move it; take ingots from Output. " +
+      "Contents are saved in this browser only.";
+  } else {
+    for (let index = 0; index < container.slots.length; index += 1) {
+      containerGrid.appendChild(makeContainerSlot(container, index));
+    }
+
+    containerInfoElement.textContent =
+      "Click an inventory stack to store it, or a chest stack to take " +
+      "it. Drag to choose a slot. Contents are saved in this browser only.";
+  }
 }
 
 // =============================================================================
@@ -1227,6 +2658,10 @@ function setInventoryOpen(open) {
   inventoryOpen = Boolean(open);
 
   inventoryPanel.classList.toggle("open", inventoryOpen);
+
+  if (!inventoryOpen && openContainerKey) {
+    closeContainer();
+  }
 
   for (const key of Object.keys(keys)) {
     keys[key] = false;
@@ -1318,10 +2753,10 @@ function applyServerInventory(serverInventory) {
       item.count <= 64
     ) {
       inventory[index] = {
-        type:
-          typeof item.type === "string"
-            ? item.type
-            : itemTypeFromColor(item.color),
+        type: resolveItemType({
+          type: item.type,
+          color: item.color.toLowerCase(),
+        }),
         color: item.color.toLowerCase(),
         count: item.count,
       };
@@ -1796,9 +3231,24 @@ function updateMining(time) {
     miningStartedAt = time;
   }
 
+  const block = getBlock(x, y, z);
+  const heldItem = inventory[selectedSlot];
+
+  if (block && !canHarvest(block, heldItem)) {
+    miningStartedAt = time;
+    mineProgressElement.style.display = "none";
+    setStatus(
+      `${requirementText(block)} to mine ${itemDisplayName(block.type)}.`,
+    );
+    return;
+  }
+
   const progress = Math.min(
     1,
-    (time - miningStartedAt) / MINE_DURATION_MS,
+    (time - miningStartedAt) /
+      (block
+        ? miningDurationMs(block, heldItem)
+        : MINE_DURATION_MS),
   );
 
   mineProgressElement.style.display = "block";
@@ -1844,21 +3294,31 @@ function placeBlock() {
     return;
   }
 
+  const hit = raycast();
+
+  if (hit && isContainerBlock(getBlock(...hit.hit))) {
+    lastSuccessfulPlacementAt = now;
+    openContainerAt(...hit.hit);
+    return;
+  }
+
   const item = inventory[selectedSlot];
 
   if (!item || item.count <= 0) {
     return;
   }
 
-  const hit = raycast();
-
   if (!hit?.previous) {
     return;
   }
 
   const [x, y, z] = hit.previous;
-  const itemType =
-    item.type || itemTypeFromColor(item.color);
+  const itemType = resolveItemType(item);
+
+  if (ITEM_DEFINITIONS[itemType]?.placeable === false) {
+    setStatus(`${itemDisplayName(itemType)} can't be placed.`);
+    return;
+  }
 
   if (itemType === "door") {
     if (!isSolid(x, y - 1, z)) {
@@ -1900,6 +3360,12 @@ function placeBlock() {
     }
 
     writeWorldBlock(x, y, z, item.color, itemType);
+
+    if (CONTAINER_KINDS.includes(itemType)) {
+      ensureContainer(x, y, z, itemType);
+      containersDirty = true;
+      saveContainers();
+    }
   }
 
   item.count -= 1;
@@ -2017,9 +3483,10 @@ function tryHorizontalMove(deltaX, deltaZ) {
       return;
     }
 
-    if (stepHeight < -0.001 || stepHeight > 0.001) {
+    if (stepHeight < -0.001) {
       camera.grounded = false;
     } else {
+      // Level ground or a step of up to MAX_STEP_HEIGHT: walk onto it.
       nextY = supportHeight;
     }
   }
@@ -3101,6 +4568,16 @@ function updateGamepad() {
       setInventoryOpen(false);
     }
 
+    if (openContainerKey) {
+      if (risingEdge("place", place)) {
+        moveInventoryToContainer(gamepadInventoryCursor);
+      }
+
+      if (risingEdge("nextSlot", nextSlot)) {
+        takeAllFromContainer();
+      }
+    }
+
     stopMining("gamepad");
   } else {
     if (
@@ -3341,6 +4818,9 @@ window.addEventListener("gamepaddisconnected", () => {
   stopMining("gamepad");
 });
 
+containerCloseButton?.addEventListener("click", closeContainer);
+
+loadContainers();
 renderInventory();
 updateCoordinates();
 connectWorldSocket();
@@ -3372,6 +4852,7 @@ function frame(time) {
 
   updatePhysics(deltaTime);
   updateMining(time);
+  updateFurnaces();
   syncPlayerPosition(time);
   updateCoordinates();
   render();
