@@ -1313,14 +1313,22 @@
       return getBlock(x, y, z) !== null;
     }
 
+    function blockType(block) {
+      return block && (block.type || itemTypeFromColor(block.color));
+    }
+
+    function isThinBlock(block) {
+      const type = blockType(block);
+      return type === "door" ||
+        type === "fence" ||
+        type === "torch" ||
+        type === "water";
+    }
+
     // Doors are thin, so they do not hide the faces of neighboring blocks.
     function isOpaqueCube(x, y, z) {
       const block = getBlock(x, y, z);
-      return block !== null &&
-        block.type !== "door" &&
-        block.type !== "fence" &&
-        block.type !== "torch" &&
-        block.type !== "water";
+      return block !== null && !isThinBlock(block);
     }
 
     addPlacedBlock(-3, terrainHeight(-3, 0), 0, "#d84838");
@@ -3297,6 +3305,7 @@
     }
 
     function addFenceFaces(faces, block) {
+      const type = blockType(block);
       const center = [
         block.x + 0.5,
         block.y + 0.5,
@@ -3322,19 +3331,21 @@
           points: polygon,
           color: shadeColor(
             block.color,
-            face.shade * (block.type === "torch" ? Math.max(worldLight, 0.85) : worldLight)
+            face.shade * (type === "torch" ? Math.max(worldLight, 0.85) : worldLight)
           )
         });
       }
     }
 
     function addCubeFaces(faces, block) {
-      if (block.type === "door" && doorStateFromColor(block.color)) {
+      const type = blockType(block);
+
+      if (type === "door" && doorStateFromColor(block.color)) {
         addDoorFaces(faces, block);
         return;
       }
 
-      if (block.type === "fence" || block.type === "torch") {
+      if (type === "fence" || type === "torch") {
         addFenceFaces(faces, block);
         return;
       }
@@ -3370,11 +3381,11 @@
         faces.push({
           depth,
           points: polygon,
-          color: block.type === "water"
+          color: type === "water"
             ? shadeColor(block.color, face.shade * worldLight)
             : shadeColor(
                 block.color,
-                face.shade * (block.type === "torch" ? Math.max(worldLight, 0.85) : worldLight)
+                face.shade * (type === "torch" ? Math.max(worldLight, 0.85) : worldLight)
               )
         });
       }
