@@ -3674,7 +3674,11 @@
         if (!wasChestOpen && chestOpen) event.stopPropagation();
       }
 
-      if (!chestOpen && document.pointerLockElement !== canvas) {
+      if (
+        event.pointerType !== "touch" &&
+        !chestOpen &&
+        document.pointerLockElement !== canvas
+      ) {
         canvas.requestPointerLock?.();
       }
     });
