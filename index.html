@@ -1396,6 +1396,11 @@
     let touchMoveY = 0;
     let touchLookX = 0;
     let touchLookY = 0;
+    const touchJoystickResets = new Set();
+
+    function resetTouchJoysticks() {
+      for (const reset of touchJoystickResets) reset();
+    }
 
     let gamepadInventoryCursor = 0;
     let gamepadDragSource = null;
@@ -2008,6 +2013,7 @@
 
       if (inventoryOpen) {
         stopMining();
+        resetTouchJoysticks();
         if (document.pointerLockElement === canvas) {
           document.exitPointerLock?.();
         }
@@ -3558,8 +3564,6 @@
         ctx.closePath();
         ctx.fillStyle = face.color;
         ctx.fill();
-        ctx.strokeStyle = "rgba(0,0,0,0.12)";
-        ctx.stroke();
       }
 
       ctx.restore();
@@ -3671,6 +3675,7 @@
       if (!element) return;
 
       let activePointerId = null;
+      const knob = element.querySelector(".touch-stick-knob");
 
       function update(event) {
         const rect = element.getBoundingClientRect();
@@ -3688,7 +3693,6 @@
           dy *= factor;
         }
 
-        const knob = element.querySelector(".touch-stick-knob");
         knob.style.setProperty("--knob-x", `${dx}px`);
         knob.style.setProperty("--knob-y", `${dy}px`);
         onMove(dx / maxDistance, dy / maxDistance);
@@ -3709,20 +3713,28 @@
         update(event);
       });
 
-      function release(event) {
-        if (event.pointerId !== activePointerId) return;
-
+      function reset() {
         activePointerId = null;
-        const knob = element.querySelector(".touch-stick-knob");
         knob.style.setProperty("--knob-x", "0px");
         knob.style.setProperty("--knob-y", "0px");
         onRelease();
       }
 
+      function release(event) {
+        if (event.pointerId !== activePointerId) return;
+        reset();
+      }
+
       element.addEventListener("pointerup", release);
       element.addEventListener("pointercancel", release);
       element.addEventListener("lostpointercapture", release);
+      touchJoystickResets.add(reset);
     }
+
+    window.addEventListener("blur", resetTouchJoysticks);
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) resetTouchJoysticks();
+    });
 
     bindVirtualJoystick(
       document.getElementById("moveStick"),
