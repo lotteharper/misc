@@ -2917,22 +2917,13 @@
       const now = performance.now();
       if (now - lastSuccessfulPlacementAt < PLACE_COOLDOWN_MS) return;
 
-      const held = inventory[selectedSlot];
-      const heldType = held ? (held.type || itemTypeFromColor(held.color)) : "hand";
-      if (!held || heldType === "bow" || /_sword$/.test(heldType)) {
-        attackTarget();
-        lastSuccessfulPlacementAt = now;
-        return;
-      }
-
       const result = raycast();
-
-      // Using (place/left-click, touch Place, gamepad trigger) on a door
-      // swings it open or closed instead of placing a block.
       if (result) {
         const [hx, hy, hz] = result.hit;
         const hitBlock = getBlock(hx, hy, hz);
 
+        // Door and chest interaction does not depend on the selected item, so
+        // clicking or tapping still works with an empty hand.
         if (hitBlock && hitBlock.type === "door") {
           if (toggleDoor(hx, hy, hz)) lastSuccessfulPlacementAt = now;
           return;
@@ -2941,6 +2932,14 @@
           setChestOpen(true, blockKey(hx, hy, hz));
           return;
         }
+      }
+
+      const held = inventory[selectedSlot];
+      const heldType = held ? (held.type || itemTypeFromColor(held.color)) : "hand";
+      if (!held || heldType === "bow" || /_sword$/.test(heldType)) {
+        attackTarget();
+        lastSuccessfulPlacementAt = now;
+        return;
       }
 
       const item = inventory[selectedSlot];
