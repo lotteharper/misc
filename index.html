@@ -772,7 +772,8 @@
       water_bucket:  { name: "Water Bucket",   color: "#4b91d1" },
       grass:         { name: "Grass",          color: "#5e9e43" },
       seeds:         { name: "Seeds",          color: "#d6b548" },
-      wheat:         { name: "Wheat",          color: "#e3c14d" },
+      sapling:        { name: "Sapling",        color: "#4d9a3a" },
+      wheat:          { name: "Wheat",          color: "#e3c14d" },
       bread:         { name: "Bread",          color: "#d69b4a" },
       arrows:        { name: "Arrows",         color: "#d5d5d5" },
       crop:          { name: "Wheat Crop",     color: "#7eaa38" },
@@ -1351,6 +1352,15 @@
       return null;
     }
 
+    function generatedGrass(x, y, z) {
+      const top = terrainHeight(x, z);
+      if (y !== top || top < 0 || isWaterPoolColumn(x, z)) return null;
+      if (hash3(x, 0, z, 79) > 0.92) {
+        return { x, y, z, color: ITEM_DEFINITIONS.grass.color, type: "grass" };
+      }
+      return null;
+    }
+
     // ---------------------------------------------------------------------
     // World blocks and edits
     // ---------------------------------------------------------------------
@@ -1358,6 +1368,7 @@
     // Null entries are tombstones for mined blocks.
     const blockEdits = new Map();
     const cropStates = new Map();
+    const saplingStates = new Map();
 
     function blockKey(x, y, z) {
       return `${x},${y},${z}`;
@@ -1378,7 +1389,8 @@
         return generatedTerrainBlock(x, y, z);
       }
 
-      return generatedFlower(x, y, z) || generatedTreeBlock(x, y, z);
+      return generatedGrass(x, y, z) || generatedFlower(x, y, z) ||
+        generatedTreeBlock(x, y, z);
     }
 
     function isSolid(x, y, z) {
@@ -1390,7 +1402,10 @@
     }
 
     function isCollidableBlock(block) {
-      return block !== null && blockType(block) !== "water";
+      return block !== null && ![
+        "water", "torch", "grass", "flower_red", "flower_yellow",
+        "flower_blue", "crop", "sapling"
+      ].includes(blockType(block));
     }
 
     function isThinBlock(block) {
@@ -1513,6 +1528,47 @@
       for (const [key, stage] of cropStates) {
         const [x, y, z] = key.split(",").map(Number);
         if (stage < 7 && cropHasWater(x, y, z)) cropStates.set(key, stage + 1);
+      }
+    }
+
+    let lastSaplingGrowthAt = 0;
+    function growSaplings(now) {
+      if (now - lastSaplingGrowthAt < 1000) return;
+      lastSaplingGrowthAt = now;
+
+      for (const [key, plantedAt] of saplingStates) {
+        if (now - plantedAt < 8000) continue;
+        const [x, y, z] = key.split(",").map(Number);
+        const height = 3 + Math.floor(hash3(x, y, z, 83) * 3);
+        const trunkTop = y + height;
+        const edits = [];
+
+        for (let trunkY = y; trunkY < trunkTop; trunkY++) {
+          edits.push({ x, y: trunkY, z, color: ITEM_DEFINITIONS.log.color });
+        }
+        for (let dx = -2; dx <= 2; dx++) {
+          for (let dz = -2; dz <= 2; dz++) {
+            for (let dy = 0; dy <= 2; dy++) {
+              if (Math.abs(dx) + Math.abs(dz) + Math.max(0, dy - 1) > 3) continue;
+              const leafX = x + dx;
+              const leafY = trunkTop + dy;
+              const leafZ = z + dz;
+              if (getBlock(leafX, leafY, leafZ)) continue;
+              edits.push({
+                x: leafX, y: leafY, z: leafZ, color: ITEM_DEFINITIONS.leaves.color
+              });
+            }
+          }
+        }
+
+        removeBlock(x, y, z);
+        for (const edit of edits) {
+          blockEdits.set(blockKey(edit.x, edit.y, edit.z), {
+            ...edit, type: itemTypeFromColor(edit.color)
+          });
+          sendWorldEdit(edit.x, edit.y, edit.z, edit.color);
+        }
+        saplingStates.delete(key);
       }
     }
 
@@ -2747,11 +2803,20 @@
       } else if (targetType === "flower_red" || targetType === "flower_yellow" ||
                  targetType === "flower_blue") {
         addToInventory(block.color, targetType);
+      } else if (targetType === "grass") {
+        addToInventory(block.color, targetType);
+        addToInventory(ITEM_DEFINITIONS.seeds.color, "seeds");
+      } else if (targetType === "leaves") {
+        addToInventory(block.color, "leaves");
+        if (Math.random() < 0.6) {
+          addToInventory(ITEM_DEFINITIONS.sapling.color, "sapling");
+        }
       }
 
       const specialHarvest = targetType === "crop" ||
         targetType === "flower_red" || targetType === "flower_yellow" ||
-        targetType === "flower_blue";
+        targetType === "flower_blue" || targetType === "grass" ||
+        targetType === "leaves";
       if (!specialHarvest && (!block || !addToInventory(
         block.color,
         block.type || itemTypeFromColor(block.color)
@@ -2993,6 +3058,8 @@
         }
         cropStates.set(blockKey(x, y, z), 0);
         type = "crop";
+      } else if (type === "sapling") {
+        saplingStates.set(blockKey(x, y, z), performance.now());
       }
       let color = type === "crop" ? ITEM_DEFINITIONS.crop.color : item.color;
       let bounds = { minX: x, maxX: x + 1, minZ: z, maxZ: z + 1 };
@@ -3661,7 +3728,8 @@
       const type = blockType(block);
 
       if (type === "flower_red" || type === "flower_yellow" ||
-          type === "flower_blue" || type === "crop") {
+          type === "flower_blue" || type === "grass" ||
+          type === "sapling" || type === "crop") {
         addCrossFaces(faces, block);
         return;
       }
@@ -4426,6 +4494,7 @@
         heal(1);
       }
       updateCrops(now);
+      growSaplings(now);
       updateMining(now);
       syncPlayerPosition(now);
       updateCoordinates();
