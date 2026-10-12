@@ -3492,7 +3492,7 @@
 
     function addDoorFaces(faces, block) {
       const state = doorStateFromColor(block.color);
-      if (!state) return;
+      if (!state || state.upper) return;
 
       const key = blockKey(block.x, block.y, block.z);
       const target = state.open ? 1 : 0;
