@@ -4030,7 +4030,13 @@
 
       if (event.button === 2) {
         event.preventDefault();
-        startMining("mouse");
+        const held = inventory[selectedSlot];
+        const heldType = held ? (held.type || itemTypeFromColor(held.color)) : "hand";
+        if (heldType === "seeds") {
+          placeBlock();
+        } else {
+          startMining("mouse");
+        }
       } else if (event.button === 0) {
         event.preventDefault();
         const wasChestOpen = chestOpen;
