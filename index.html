@@ -2433,6 +2433,11 @@
           return;
         }
 
+        if (message.type === "damage" && Number.isFinite(message.amount)) {
+          takeDamage(Math.max(0, Math.min(20, message.amount)));
+          return;
+        }
+
         if (message.type === "world_edit" && message.edit) {
           const edit = message.edit;
 
@@ -2865,7 +2870,16 @@
           target = id;
         }
       }
-      if (target) showToast(`${isBow ? "Arrow" : "Hit"} struck ${target}.`);
+      if (target) {
+        const damage = isBow ? 5 : type === "hand" ? 1 :
+          2 + (TOOL_TIERS[type] || 1);
+        if (worldSocket?.readyState === WebSocket.OPEN) {
+          worldSocket.send(JSON.stringify({
+            type: "combat", target_id: target, damage
+          }));
+        }
+        showToast(`${isBow ? "Arrow" : "Hit"} struck ${target}.`);
+      }
       return true;
     }
 
@@ -4309,6 +4323,11 @@
 
         if (message.type === "player_left") {
           remotePlayers.delete(message.player_id);
+          return;
+        }
+
+        if (message.type === "damage" && Number.isFinite(message.amount)) {
+          takeDamage(Math.max(0, Math.min(20, message.amount)));
           return;
         }
 
