@@ -3759,10 +3759,6 @@
         const neighbor = getBlock(
           block.x + nx, block.y + ny, block.z + nz
         );
-        const neighborState = neighbor?.type === "door"
-          ? doorStateFromColor(neighbor.color)
-          : null;
-        if (neighborState && !neighborState.open) continue;
         if (
           type === "water" &&
           blockType(neighbor) === "water"
