@@ -3534,9 +3534,9 @@
     let frameDeltaMs = 16;
     let renderFrameId = 0;
     let worldLight = 1;
-    // Faces are painter-sorted rather than depth-tested. Keep door surfaces
-    // just in front of coplanar block faces so a door does not flicker with
-    // the block behind its hinge edge.
+    // Faces are painter-sorted rather than depth-tested. Doors are rendered
+    // in a final opaque layer so overlapping block faces cannot show through
+    // the panel in close quarters.
     const DOOR_RENDER_DEPTH_BIAS = 1e-4;
 
     function updateDayNight() {
@@ -3930,10 +3930,11 @@
         if (swing.seen < renderFrameId - 1) doorSwing.delete(key);
       }
 
-      faces.sort((a, b) =>
-        b.depth - a.depth ||
-        (a.renderPriority || 0) - (b.renderPriority || 0)
-      );
+      faces.sort((a, b) => {
+        const priorityDifference =
+          (a.renderPriority || 0) - (b.renderPriority || 0);
+        return priorityDifference || b.depth - a.depth;
+      });
 
       ctx.save();
       ctx.beginPath();
