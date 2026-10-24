@@ -3537,7 +3537,7 @@
     // Faces are painter-sorted rather than depth-tested. Keep door surfaces
     // just in front of coplanar block faces so a door does not flicker with
     // the block behind its hinge edge.
-    const DOOR_RENDER_DEPTH_BIAS = 1e-4;
+    const DOOR_RENDER_DEPTH_BIAS = 0.01;
 
     function updateDayNight() {
       const cycle = 30 * 60 * 1000;
@@ -3756,9 +3756,16 @@
 
         if (!faceFacesCamera(center, [nx, ny, nz])) continue;
         if (isOpaqueCube(block.x + nx, block.y + ny, block.z + nz)) continue;
+        const neighbor = getBlock(
+          block.x + nx, block.y + ny, block.z + nz
+        );
+        const neighborState = neighbor?.type === "door"
+          ? doorStateFromColor(neighbor.color)
+          : null;
+        if (neighborState && !neighborState.open) continue;
         if (
           type === "water" &&
-          blockType(getBlock(block.x + nx, block.y + ny, block.z + nz)) === "water"
+          blockType(neighbor) === "water"
         ) {
           continue;
         }
