@@ -3534,6 +3534,10 @@
     let frameDeltaMs = 16;
     let renderFrameId = 0;
     let worldLight = 1;
+    // Faces are painter-sorted rather than depth-tested. Keep door surfaces
+    // just in front of coplanar block faces so a door does not flicker with
+    // the block behind its hinge edge.
+    const DOOR_RENDER_DEPTH_BIAS = 1e-4;
 
     function updateDayNight() {
       const cycle = 30 * 60 * 1000;
@@ -3609,7 +3613,10 @@
         if (polygon.length < 3) return;
 
         faces.push({
-          depth: polygon.reduce((sum, v) => sum + v[2], 0) / polygon.length,
+          depth:
+            polygon.reduce((sum, v) => sum + v[2], 0) / polygon.length -
+            DOOR_RENDER_DEPTH_BIAS,
+          renderPriority: 1,
           points: polygon,
           color: shadeColor(
             ITEM_DEFINITIONS.door.color,
@@ -3923,7 +3930,10 @@
         if (swing.seen < renderFrameId - 1) doorSwing.delete(key);
       }
 
-      faces.sort((a, b) => b.depth - a.depth);
+      faces.sort((a, b) =>
+        b.depth - a.depth ||
+        (a.renderPriority || 0) - (b.renderPriority || 0)
+      );
 
       ctx.save();
       ctx.beginPath();
