@@ -420,6 +420,7 @@
   let roundComplete = false;
   let gameFinished = false;
   let pendingWinner = null;
+  let localRoundCompleteSent = false;
   let roundKey = "";
 
   let playerScore = 0;
@@ -440,6 +441,7 @@
   let discardBitmap = null;
   let roundDialog = null;
   let settlementAdvanceButton = null;
+  let settlementInstruction = null;
 
   let confettiPieces = [];
   let confettiRunning = false;
@@ -547,6 +549,7 @@
     roundComplete = false;
     roundKey = "";
     pendingWinner = null;
+    localRoundCompleteSent = false;
 
     roundSettlement = false;
     roundWinner = null;
@@ -576,6 +579,7 @@
     roundComplete = false;
     gameFinished = false;
     pendingWinner = null;
+    localRoundCompleteSent = false;
     roundKey = "";
 
     roundSettlement = false;
@@ -746,15 +750,22 @@
           return;
         }
 
-        if (pendingWinner === user) {
-          sendAction(
+        if (pendingWinner === user && !localRoundCompleteSent) {
+          if (sendAction(
             "round_complete," +
             currentRound +
             "," +
             user
-          );
+          )) {
+            localRoundCompleteSent = true;
+            pendingWinner = null;
 
-          pendingWinner = null;
+            /*
+             * The server may not echo our own action, so the
+             * winning client enters settlement immediately.
+             */
+            finishRound(user);
+          }
         }
       });
     }
@@ -1488,6 +1499,14 @@
 
     const enabled = canAdvanceSettlement();
 
+    if (settlementInstruction) {
+      settlementInstruction.text = loserFinalTurnComplete
+        ? "Both hands scored"
+        : settlementTurnPlayer === user
+          ? "Draw and discard your final card"
+          : "Waiting for the opposing player's final turn";
+    }
+
     settlementAdvanceButton.enabled = enabled;
     settlementAdvanceButton.mouseEnabled = enabled;
 
@@ -1623,6 +1642,7 @@
     roundComplete = false;
     roundKey = "";
     pendingWinner = null;
+    localRoundCompleteSent = false;
     opponentHandRevealed = false;
 
     canDraw = getRoundStarter(currentRound) === user;
@@ -1659,9 +1679,9 @@
       )
       .drawRoundRect(
         leftBound + 70,
-        topBound + 625,
+        topBound + 662,
         860,
-        165,
+        46,
         16
       );
 
@@ -1675,8 +1695,8 @@
       "#000000"
     );
 
-    message.x = leftBound + 250;
-    message.y = topBound + 650;
+    message.x = leftBound + 200;
+    message.y = topBound + 672;
     message.textAlign = "center";
     message.mouseEnabled = false;
 
@@ -1688,9 +1708,9 @@
       "#000000"
     );
 
-    instruction.x = leftBound + 250;
-    instruction.y = topBound + 700;
-    instruction.textAlign = "center";
+    instruction.x = leftBound + 410;
+    instruction.y = topBound + 674;
+    instruction.textAlign = "left";
     instruction.mouseEnabled = false;
 
     const advanceButton = new createjs.Container();
@@ -1699,11 +1719,11 @@
     buttonBackground.graphics
       .beginFill("#e8cd71")
       .drawRoundRect(
-        leftBound + 535,
-        topBound + 660,
-        330,
-        70,
-        12
+        leftBound + 650,
+        topBound + 666,
+        270,
+        38,
+        10
       );
 
     const buttonLabel = new createjs.Text(
@@ -1714,8 +1734,8 @@
       "#000000"
     );
 
-    buttonLabel.x = leftBound + 700;
-    buttonLabel.y = topBound + 683;
+    buttonLabel.x = leftBound + 785;
+    buttonLabel.y = topBound + 676;
     buttonLabel.textAlign = "center";
     buttonLabel.mouseEnabled = false;
 
@@ -1737,6 +1757,7 @@
     });
 
     settlementAdvanceButton = advanceButton;
+    settlementInstruction = instruction;
 
     roundDialog.addChild(
       panel,
@@ -1766,6 +1787,7 @@
 
     roundDialog = null;
     settlementAdvanceButton = null;
+    settlementInstruction = null;
   }
 
   /*
@@ -2187,6 +2209,7 @@
     roundComplete = false;
     gameFinished = false;
     pendingWinner = null;
+    localRoundCompleteSent = false;
     roundKey = "";
 
     roundSettlement = false;
