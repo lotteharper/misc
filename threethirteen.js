@@ -1545,6 +1545,7 @@
       return false;
     }
 
+    advanceRound();
     return true;
   }
 
@@ -2100,10 +2101,10 @@
         return;
       }
 
-      /*
-       * Never ignore this because it came from the local actor.
-       * The sender advances locally; the other client advances here.
-       */
+      if (localActor && !replayMode) {
+        return;
+      }
+
       scoreCompletedRound();
       advanceRound();
 
