@@ -3538,6 +3538,9 @@
     // just in front of coplanar block faces so a door does not flicker with
     // the block behind its hinge edge.
     const DOOR_RENDER_DEPTH_BIAS = 0.01;
+    // Thin plant faces meet the terrain at the same depth. Keep them just in
+    // front of that seam so painter sorting cannot make their bases disappear.
+    const PLANT_RENDER_DEPTH_BIAS = 0.02;
 
     function updateDayNight() {
       const cycle = 30 * 60 * 1000;
@@ -3709,7 +3712,11 @@
         const polygon = clipNear(points.map(worldToCamera));
         if (polygon.length >= 3) {
           faces.push({
-            depth: polygon.reduce((sum, vertex) => sum + vertex[2], 0) / polygon.length,
+            depth:
+              polygon.reduce((sum, vertex) => sum + vertex[2], 0) /
+                polygon.length -
+              PLANT_RENDER_DEPTH_BIAS,
+            renderPriority: 2,
             points: polygon,
             color: shadeColor(color, worldLight)
           });
