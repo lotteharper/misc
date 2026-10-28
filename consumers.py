@@ -489,6 +489,17 @@ class GameConsumer(AsyncWebsocketConsumer):
             },
         )
 
+        # Draws and discards are already applied by their sender. Round
+        # advancement is server-confirmed, so echo it to the sender as well
+        # as notifying the other player.
+        if result["action"].startswith("round_advance,"):
+            await self.send(
+                text_data=json.dumps({
+                    "type": "game_action",
+                    "action": result["action"],
+                })
+            )
+
     async def game_action(self, event):
         if event.get("sender") == self.channel_name:
             return
