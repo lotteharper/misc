@@ -1545,12 +1545,6 @@
       return false;
     }
 
-    /*
-     * The sender advances immediately. The other client advances
-     * when it receives the round_advance action.
-     */
-    advanceRound();
-
     return true;
   }
 
