@@ -1661,7 +1661,7 @@
     removeRoundDialog();
 
     roundDialog = new createjs.Container();
-    roundDialog.mouseEnabled = false;
+    roundDialog.mouseEnabled = true;
     roundDialog.mouseChildren = true;
 
     const panel = new createjs.Shape();
@@ -1714,8 +1714,8 @@
     buttonBackground.graphics
       .beginFill("#e8cd71")
       .drawRoundRect(
-        leftBound + 650,
-        topBound + 666,
+        0,
+        0,
         270,
         38,
         10
@@ -1729,13 +1729,20 @@
       "#000000"
     );
 
-    buttonLabel.x = leftBound + 785;
-    buttonLabel.y = topBound + 676;
+    buttonLabel.x = 135;
+    buttonLabel.y = 10;
     buttonLabel.textAlign = "center";
     buttonLabel.mouseEnabled = false;
 
+    advanceButton.x = leftBound + 650;
+    advanceButton.y = topBound + 666;
     advanceButton.background = buttonBackground;
     advanceButton.label = buttonLabel;
+    advanceButton.hitArea = new createjs.Shape();
+    advanceButton.hitArea.graphics
+      .beginFill("#000000")
+      .drawRect(0, 0, 270, 38);
+    advanceButton.cursor = "pointer";
 
     advanceButton.addChild(
       buttonBackground,
