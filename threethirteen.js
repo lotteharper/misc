@@ -1612,8 +1612,13 @@
       canDraw = false;
       canDiscard = false;
 
-      opponentHandRevealed = false;
       settlementTurnPlayer = null;
+
+      /*
+       * Keep both completed hands visible behind the final dialog.
+       */
+      drawPlayerHand();
+      drawOpponentHand(true);
 
       drawFinishedDialog();
       stage.update();
