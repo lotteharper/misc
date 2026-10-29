@@ -1529,15 +1529,19 @@
       return false;
     }
 
-    settlementActionSent = true;
-    updateSettlementAdvanceButton();
-
-    sendAction(
+    const sent = sendAction(
       "round_advance," +
       currentRound +
       "," +
       user
     );
+
+    if (!sent) {
+      return false;
+    }
+
+    settlementActionSent = true;
+    updateSettlementAdvanceButton();
 
     return advanceRound();
   }
