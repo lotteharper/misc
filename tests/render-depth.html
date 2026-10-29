@@ -1,0 +1,122 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Depth rendering tests</title>
+<pre id="result">Running...</pre>
+<iframe id="game" src="../index.html" width="320" height="240"></iframe>
+<script>
+  function runTests() {
+    const failures = [];
+    const assert = (condition, message) => {
+      if (!condition) failures.push(message);
+    };
+    const readPixel = (x, y) => Array.from(
+      ctx.getImageData(Math.floor(canvas.width * x), Math.floor(canvas.height * y), 1, 1).data
+    ).slice(0, 3).join(",");
+    const renderers = [
+      ["software", faces => renderSoftwareDepthFaces(faces, [0, 0, 0], canvas.width, canvas.height)]
+    ];
+    if (gl) renderers.push(["WebGL", faces => renderDepthFaces(faces, [0, 0, 0])]);
+
+    // Intersecting surfaces cannot be ordered correctly by one depth per face.
+    const focal = Math.max(1, Math.min(screenWidth, screenHeight) * 0.55);
+    const point = (x, y, z) => [
+      x * screenWidth * z / (2 * focal), y * screenHeight * z / (2 * focal), z
+    ];
+    const red = {
+      color: "rgb(255,0,0)",
+      points: [point(-0.5, -0.5, 1), point(0.5, -0.5, 5),
+        point(0.5, 0.5, 5), point(-0.5, 0.5, 1)]
+    };
+    const blue = {
+      color: "rgb(0,0,255)",
+      points: [point(-0.5, -0.5, 3), point(0.5, -0.5, 3),
+        point(0.5, 0.5, 3), point(-0.5, 0.5, 3)]
+    };
+
+    for (const [name, draw] of renderers) {
+      for (const faces of [[red, blue], [blue, red]]) {
+        draw(faces);
+        assert(readPixel(0.3, 0.52) === "255,0,0", `${name}: near side of intersection`);
+        assert(readPixel(0.7, 0.52) === "0,0,255", `${name}: far side of intersection`);
+      }
+    }
+
+    camera.pos = [0.5, 0, 0];
+    camera.rot = [0, 0];
+    worldLight = 1;
+    const background = {
+      points: clipNear([[-2, -1, 6], [3, -1, 6], [3, 4, 6], [-2, 4, 6]].map(worldToCamera)),
+      color: "rgb(0,0,255)"
+    };
+    const foreground = {
+      points: clipNear([[-2, -1, 2], [3, -1, 2], [3, 4, 2], [-2, 4, 2]].map(worldToCamera)),
+      color: "rgb(0,0,255)"
+    };
+    const cases = [
+      ["closed door", "door", ITEM_DEFINITIONS.door.color],
+      ["open door", "door", doorColorFromState({ open: true, facing: 0, hingeRight: false })],
+      ["grass", "grass"],
+      ["young crop", "crop"],
+      ["mature crop", "crop"],
+      ["sapling", "sapling"],
+      ["flower", "flower_red"]
+    ];
+    for (const [label, type, color] of cases) {
+      const block = { x: 0, y: 1, z: 3, type, color: color || ITEM_DEFINITIONS[type].color };
+      doorSwing.delete(blockKey(0, 1, 3));
+      if (type === "door") {
+        const state = doorStateFromColor(block.color);
+        blockEdits.set(blockKey(0, 1, 3), block);
+        blockEdits.set(blockKey(0, 2, 3), {
+          ...block, y: 2, color: doorColorFromState({ ...state, upper: true })
+        });
+      }
+      if (type === "crop") cropStates.set(blockKey(0, 1, 3), label === "mature crop" ? 7 : 0);
+      const faces = [];
+      addCubeFaces(faces, block);
+      assert(faces.length > 0, `${label}: generated faces`);
+      for (const [name, draw] of renderers) {
+        draw([background, ...faces]);
+        const first = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+        draw([...faces].reverse().concat(background));
+        const second = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+        let changed = 0;
+        let visible = 0;
+        for (let i = 0; i < first.length; i += 4) {
+          if (first[i] !== second[i] || first[i + 1] !== second[i + 1] ||
+              first[i + 2] !== second[i + 2]) changed++;
+          if (first[i] > 10 && first[i + 2] < 200) visible++;
+        }
+        assert(visible > 0, `${name}: ${label} visible in front of background`);
+        assert(changed === 0, `${name}: ${label} changed with draw order (${changed} pixels)`);
+        draw([foreground]);
+        const wall = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+        draw([foreground, ...faces]);
+        const hidden = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+        let leaked = 0;
+        for (let i = 0; i < wall.length; i += 4) {
+          if (wall[i] !== hidden[i] || wall[i + 1] !== hidden[i + 1] ||
+              wall[i + 2] !== hidden[i + 2]) leaked++;
+        }
+        assert(leaked === 0, `${name}: ${label} leaked through foreground (${leaked} pixels)`);
+      }
+      if (type === "door") {
+        blockEdits.delete(blockKey(0, 1, 3));
+        blockEdits.delete(blockKey(0, 2, 3));
+      }
+    }
+    return { failures, renderers: renderers.map(([name]) => name) };
+  }
+
+  document.getElementById("game").addEventListener("load", event => {
+    const result = document.getElementById("result");
+    try {
+      const outcome = event.target.contentWindow.eval(`(${runTests.toString()})()`);
+      result.textContent = outcome.failures.length
+        ? `FAIL\n${outcome.failures.join("\n")}`
+        : `PASS: ${outcome.renderers.join(", ")}`;
+    } catch (error) {
+      result.textContent = `FAIL\n${error.stack}`;
+    }
+  });
+</script>
