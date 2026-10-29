@@ -160,12 +160,17 @@ def append_turn(game_id, action):
                 "round_advance," + completed_round + ","
             )
 
-            if any(
-                existing.startswith(round_advance_prefix)
-                for existing in existing_actions
-            ):
+            previous_advance = next(
+                (
+                    existing for existing in existing_actions
+                    if existing.startswith(round_advance_prefix)
+                ),
+                None,
+            )
+
+            if previous_advance:
                 return {
-                    "action": action,
+                    "action": previous_advance,
                     "history": existing_actions,
                     "duplicate": True,
                 }
@@ -503,9 +508,23 @@ class GameConsumer(AsyncWebsocketConsumer):
         )
 
         if result is None:
+            if message.startswith("round_advance,"):
+                await self.send(
+                    text_data=json.dumps({
+                        "type": "game_action_error",
+                        "action": message,
+                    })
+                )
             return
 
         if result["duplicate"]:
+            if result["action"].startswith("round_advance,"):
+                await self.send(
+                    text_data=json.dumps({
+                        "type": "game_action",
+                        "action": result["action"],
+                    })
+                )
             return
 
         await self.channel_layer.group_send(
