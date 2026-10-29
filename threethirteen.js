@@ -1532,21 +1532,14 @@
     settlementActionSent = true;
     updateSettlementAdvanceButton();
 
-    const sent = sendAction(
+    sendAction(
       "round_advance," +
       currentRound +
       "," +
       user
     );
 
-    if (!sent) {
-      settlementActionSent = false;
-      updateSettlementAdvanceButton();
-      return false;
-    }
-
-    advanceRound();
-    return true;
+    return advanceRound();
   }
 
   function finishRound(winner) {
