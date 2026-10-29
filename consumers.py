@@ -152,6 +152,34 @@ def append_turn(game_id, action):
                 "duplicate": True,
             }
 
+        action_parts = action.split(",")
+
+        if action_parts[0] == "round_advance":
+            completed_round = action_parts[1]
+            round_advance_prefix = (
+                "round_advance," + completed_round + ","
+            )
+
+            if any(
+                existing.startswith(round_advance_prefix)
+                for existing in existing_actions
+            ):
+                return {
+                    "action": action,
+                    "history": existing_actions,
+                    "duplicate": True,
+                }
+
+            round_complete_prefix = (
+                "round_complete," + completed_round + ","
+            )
+
+            if not any(
+                existing.startswith(round_complete_prefix)
+                for existing in existing_actions
+            ):
+                return None
+
         existing_actions.append(action)
 
         game.turn = action
