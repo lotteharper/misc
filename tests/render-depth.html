@@ -19,6 +19,24 @@
     flush();
     assert(rendererState.renderer instanceof THREE.WebGLRenderer, "uses Three.js WebGLRenderer");
     assert(rendererState.renderer.shadowMap.enabled, "shadows enabled");
+    const mathUtils = THREE.MathUtils;
+    THREE.MathUtils = undefined;
+    try {
+      for (const [width, height] of [[320, 240], [240, 320]]) {
+        rendererState.resize(width, height, 1);
+        const focalLength = Math.max(1, Math.min(width, height) * 0.55);
+        const expectedFov = 2 * Math.atan(height / (2 * focalLength)) * 180 / Math.PI;
+        assert(Math.abs(rendererState.view.fov - expectedFov) < 1e-10,
+          "resize preserves the vertical field of view without THREE.MathUtils");
+        assert(rendererState.view.aspect === width / height,
+          "resize updates the camera aspect ratio");
+        assert(rendererState.renderer.domElement.width === width &&
+          rendererState.renderer.domElement.height === height, "resize updates the drawing buffer");
+      }
+    } finally {
+      THREE.MathUtils = mathUtils;
+      resizeCanvas();
+    }
     const initial = chunk(0, -10);
     render();
     assert(chunk(0, -10) === initial, "unchanged chunks are reused");
