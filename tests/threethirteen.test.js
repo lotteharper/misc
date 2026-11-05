@@ -123,7 +123,19 @@ function createClient(player) {
     },
     Image, WebSocket, setTimeout, clearTimeout, console,
   };
-  vm.runInNewContext(source, context);
+  const instrumentedSource = source.replace(/\}\)\(\);\s*$/, `
+    globalThis.testGame = {
+      Card, calculateScore, sortCardsByMeld,
+      setOpponentCards(cards, round) {
+        opponentCards = cards;
+        currentRound = round;
+        drawOpponentHand(false);
+      },
+      opponentCards: () => opponentCards,
+      opponentObjects: () => opponentObjects
+    };
+  })();`);
+  vm.runInNewContext(instrumentedSource, context);
 
   function find(predicate) {
     function search(node, enabled) {
@@ -149,6 +161,7 @@ function createClient(player) {
   }
 
   return {
+    game: context.testGame,
     socket: () => sockets[0],
     find,
     click,
@@ -161,6 +174,90 @@ function createClient(player) {
       node.x === 500 && node.y === 470),
   };
 }
+
+function cardLabels(cards) {
+  return Array.from(cards, (card) => `${card.getValue()}.${card.getSuit()}`);
+}
+
+test("meld ordering uses the scoring hand without changing cards or score", () => {
+  const { game } = createClient("Player 1");
+  const cards = [
+    new game.Card(8, 1), new game.Card(1, 2), new game.Card(5, 0),
+    new game.Card(8, 0), new game.Card(6, 1), new game.Card(3, 0),
+    new game.Card(8, 3), new game.Card(9, 3),
+  ];
+  const original = cardLabels(cards);
+  const score = game.calculateScore(cards, 7);
+  const sorted = game.sortCardsByMeld(cards, 7);
+
+  assert.deepEqual(cardLabels(sorted), [
+    "3.0", "6.1", "5.0", "8.0", "8.1", "8.3", "1.2", "9.3",
+  ]);
+  assert.equal(score, 12);
+  assert.equal(game.calculateScore(sorted, 7), score);
+  assert.deepEqual(cardLabels(cards), original);
+  assert.equal(new Set(sorted).size, cards.length);
+});
+
+test("meld ordering handles sets with wildcards, duplicates, high aces and wild-only melds", () => {
+  const { game } = createClient("Player 1");
+  const makeCards = (labels) => labels.map(([value, suit]) => new game.Card(value, suit));
+  const cases = [
+    {
+      round: 5,
+      cards: [[9, 3], [8, 0], [4, 2], [8, 0], [1, 1]],
+      expected: ["8.0", "8.0", "4.2", "9.3", "1.1"],
+    },
+    {
+      round: 5,
+      cards: [[0, 0], [11, 0], [4, 1], [1, 3]],
+      expected: ["11.0", "4.1", "0.0", "1.3"],
+    },
+    {
+      round: 5,
+      cards: [[4, 2], [4, 0], [4, 3]],
+      expected: ["4.2", "4.0", "4.3"],
+    },
+    {
+      round: 5,
+      cards: [[1, 3], [8, 0], [4, 2]],
+      expected: ["1.3", "8.0", "4.2"],
+    },
+  ];
+  for (const { round, cards: values, expected } of cases) {
+    const cards = makeCards(values);
+    const score = game.calculateScore(cards, round);
+    const sorted = game.sortCardsByMeld(cards, round);
+    assert.deepEqual(cardLabels(sorted), expected);
+    assert.equal(game.calculateScore(sorted, round), score);
+    assert.deepEqual(cardLabels(cards), values.map(([value, suit]) => `${value}.${suit}`));
+  }
+});
+
+test("revealed opponent hand is redrawn in meld order during settlement", async () => {
+  const [client] = await setup();
+  const { game } = client;
+  const cards = [
+    new game.Card(8, 1), new game.Card(1, 2), new game.Card(5, 0),
+    new game.Card(8, 0), new game.Card(6, 1), new game.Card(3, 0),
+    new game.Card(8, 3),
+  ];
+  game.setOpponentCards(cards, 7);
+  assert.ok(Array.from(game.opponentObjects()).every((bitmap) => bitmap.image.url.endsWith("/back.png")));
+
+  action(client, "round_complete,7,Player 1");
+  const shown = () => Array.from(game.opponentObjects())
+    .sort((a, b) => a.y - b.y || a.x - b.x)
+    .map((bitmap) => bitmap.image.url.split("/").pop());
+  assert.deepEqual(shown(), ["4S.png", "7H.png", "6S.png", "9S.png", "9H.png", "9D.png", "2C.png"]);
+  assert.deepEqual(cardLabels(game.opponentCards()), cardLabels(cards));
+
+  action(client, "draw,deck,Player 2");
+  assert.equal(game.opponentObjects().length, 8);
+  action(client, "discard,1.2,Player 2");
+  assert.deepEqual(shown(), ["4S.png", "7H.png", "6S.png", "9S.png", "9H.png", "9D.png", "QC.png"]);
+  assert.deepEqual(cardLabels(game.opponentCards()), ["8.1", "5.0", "8.0", "6.1", "3.0", "8.3", "11.2"]);
+});
 
 async function setup() {
   const first = createClient("Player 1");

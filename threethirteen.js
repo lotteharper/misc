@@ -301,14 +301,39 @@
     };
   }
 
-  function calculateScore(cards, roundNumber) {
+  function findScoredHand(cards, roundNumber) {
     const round = Number(roundNumber || currentRound || 3);
     const result = buildMatrixFromCards(cards, round);
     const hand = new Hand(result.matrix, result.jokers, round);
 
     hand.findMelds();
 
-    return hand.value;
+    return hand;
+  }
+
+  function calculateScore(cards, roundNumber) {
+    return findScoredHand(cards, roundNumber).value;
+  }
+
+  function sortCardsByMeld(cards, roundNumber) {
+    const remaining = cards.slice();
+    const sorted = [];
+    const hand = findScoredHand(cards, roundNumber);
+
+    hand.melds.forEach(function(meldCard) {
+      const index = remaining.findIndex(function(card) {
+        return meldCard.s < 0
+          ? isWildcardCard(card, roundNumber)
+          : card.getSuit() === meldCard.s &&
+            card.getValue() === meldCard.n % 13;
+      });
+
+      if (index >= 0) {
+        sorted.push(remaining.splice(index, 1)[0]);
+      }
+    });
+
+    return sorted.concat(remaining);
   }
 
   /*
@@ -757,7 +782,10 @@
   function drawOpponentHand(faceUp) {
     clearObjects(opponentObjects);
 
-    const cardCount = opponentCards.length;
+    const cards = faceUp
+      ? sortCardsByMeld(opponentCards, currentRound)
+      : opponentCards;
+    const cardCount = cards.length;
 
     if (cardCount === 0) {
       stage.update();
@@ -771,7 +799,7 @@
     const cardSpacing = 130;
 
     for (let i = cardCount - 1; i >= 0; i--) {
-      const card = opponentCards[i];
+      const card = cards[i];
 
       if (!card) {
         continue;
