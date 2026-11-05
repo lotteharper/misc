@@ -652,23 +652,6 @@
     return bitmap;
   }
 
-  function drawWildcardMarker(bitmap) {
-    const marker = new createjs.Text(
-      "WILD",
-      "bold 18px Arial",
-      "#8a0010"
-    );
-
-    marker.x = bitmap.x + 28;
-    marker.y = bitmap.y + 24;
-    marker.textAlign = "center";
-    marker.mouseEnabled = false;
-
-    container.addChild(marker);
-
-    return marker;
-  }
-
   function drawPlayerHand() {
     clearObjects(playerObjects);
 
@@ -697,11 +680,6 @@
       bitmap.cardValue = card.getValue();
       bitmap.cardSuit = card.getSuit();
       playerObjects.push(bitmap);
-
-      if (isWildcardCard(card, currentRound)) {
-        bitmap.alpha = 0.92;
-        playerObjects.push(drawWildcardMarker(bitmap));
-      }
 
       bitmap.on("mousedown", function(event) {
         if (
@@ -786,7 +764,7 @@
     const row1Count = Math.min(7, cardCount);
     const row2Count = cardCount - row1Count;
     const row1Y = 80;
-    const row2Y = 240;
+    const row2Y = 170;
     const cardSpacing = 130;
 
     for (let i = cardCount - 1; i >= 0; i--) {
@@ -825,13 +803,6 @@
 
       opponentObjects.push(bitmap);
 
-      if (
-        faceUp &&
-        isWildcardCard(card, currentRound)
-      ) {
-        bitmap.alpha = 0.92;
-        opponentObjects.push(drawWildcardMarker(bitmap));
-      }
     }
 
     stage.update();
@@ -900,11 +871,6 @@
 
     if (!discardBitmap) {
       return;
-    }
-
-    if (isWildcardCard(topCard, currentRound)) {
-      discardBitmap.alpha = 0.94;
-      drawWildcardMarker(discardBitmap);
     }
 
     discardBitmap.mouseEnabled = true;
