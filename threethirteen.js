@@ -432,6 +432,7 @@
   let settlementTurnPlayer = null;
   let loserFinalTurnComplete = false;
   let settlementActionSent = false;
+  let opponentReady = false;
   let roundScoreApplied = false;
   let opponentHandRevealed = false;
 
@@ -556,6 +557,7 @@
     settlementTurnPlayer = null;
     loserFinalTurnComplete = false;
     settlementActionSent = false;
+    opponentReady = false;
     roundScoreApplied = false;
     opponentHandRevealed = false;
 
@@ -587,6 +589,7 @@
     settlementTurnPlayer = null;
     loserFinalTurnComplete = false;
     settlementActionSent = false;
+    opponentReady = false;
     roundScoreApplied = false;
     opponentHandRevealed = false;
 
@@ -1467,7 +1470,11 @@
 
     if (settlementInstruction) {
       settlementInstruction.text = errorMessage || (loserFinalTurnComplete
-        ? "Both hands scored"
+        ? settlementActionSent
+          ? "Waiting for the other player"
+          : opponentReady
+            ? "Other player is ready"
+            : "Both hands scored"
         : settlementTurnPlayer === user
           ? "Draw and discard your final card"
           : "Waiting for the opposing player's final turn");
@@ -1496,7 +1503,7 @@
     }
 
     const sent = sendAction(
-      "round_advance," +
+      "round_ready," +
       currentRound +
       "," +
       user
@@ -1528,6 +1535,7 @@
     roundSettlement = true;
     roundComplete = true;
     settlementActionSent = false;
+    opponentReady = false;
     roundScoreApplied = false;
     loserFinalTurnComplete = false;
     opponentHandRevealed = true;
@@ -1597,6 +1605,7 @@
     settlementTurnPlayer = null;
     loserFinalTurnComplete = false;
     settlementActionSent = false;
+    opponentReady = false;
     roundScoreApplied = false;
     roundComplete = false;
     roundKey = "";
@@ -2010,6 +2019,7 @@
 
     if (
       type === "round_complete" ||
+      type === "round_ready" ||
       type === "round_advance"
     ) {
       const roundNumber = Number(parts[1]);
@@ -2019,6 +2029,7 @@
         Number.isInteger(roundNumber) &&
         roundNumber >= 3 &&
         roundNumber <= 13 &&
+        (type !== "round_ready" || parts[2] === PLAYER_ONE || parts[2] === PLAYER_TWO) &&
         Boolean(parts[2])
       );
     }
@@ -2050,6 +2061,18 @@
         finishRound(winner);
       }
 
+      return;
+    }
+
+    if (type === "round_ready") {
+      if (Number(parts[1]) === currentRound && roundSettlement && !gameFinished) {
+        if (localActor) {
+          settlementActionSent = true;
+        } else {
+          opponentReady = true;
+        }
+        updateSettlementAdvanceButton();
+      }
       return;
     }
 
@@ -2172,6 +2195,7 @@
     settlementTurnPlayer = null;
     loserFinalTurnComplete = false;
     settlementActionSent = false;
+    opponentReady = false;
     roundScoreApplied = false;
     opponentHandRevealed = false;
 
@@ -2252,7 +2276,7 @@
 
     if (
       message.type === "game_action_error" &&
-      message.action === "round_advance," + currentRound + "," + user &&
+      message.action === "round_ready," + currentRound + "," + user &&
       roundSettlement &&
       settlementActionSent
     ) {
