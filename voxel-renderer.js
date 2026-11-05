@@ -331,7 +331,7 @@ function createVoxelRenderer() {
     renderer.setPixelRatio(ratio);
     renderer.setSize(width, height, false);
     const focalLength = Math.max(1, Math.min(width, height) * 0.55);
-    view.fov = THREE.MathUtils.radToDeg(2 * Math.atan(height / (2 * focalLength)));
+    view.fov = 2 * Math.atan(height / (2 * focalLength)) * 180 / Math.PI;
     view.aspect = width / height;
     view.updateProjectionMatrix();
   }
