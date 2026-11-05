@@ -92,31 +92,62 @@ class ConsumerTests(unittest.IsolatedAsyncioTestCase):
         self.consumer.send = send
         self.consumer.channel_layer = types.SimpleNamespace(group_send=group_send)
 
-    async def test_confirmation_and_concurrent_duplicate(self):
-        await self.consumer.receive("round_advance,3,Player 1/")
+    async def test_both_players_must_be_ready_and_retries_are_idempotent(self):
+        await self.consumer.receive("round_ready,3,Player 1/")
         self.assertEqual(self.game.turns, (
-            "round_complete,3,Player 1/round_advance,3,Player 1/"
+            "round_complete,3,Player 1/round_ready,3,Player 1/"
         ))
         self.assertEqual(self.messages[-1], {
-            "type": "game_action", "action": "round_advance,3,Player 1"
+            "type": "game_action", "action": "round_ready,3,Player 1"
         })
         self.assertEqual(len(self.broadcasts), 1)
 
-        await self.consumer.receive("round_advance,3,Player 2/")
-        self.assertEqual(self.messages[-1], {
-            "type": "game_action", "action": "round_advance,3,Player 1"
-        })
+        await self.consumer.receive("round_ready,3,Player 1/")
+        self.assertEqual(self.game.turns.count("round_ready"), 1)
         self.assertEqual(len(self.broadcasts), 1)
+
+        await self.consumer.receive("round_ready,3,Player 2/")
+        self.assertEqual(self.game.turns, (
+            "round_complete,3,Player 1/round_ready,3,Player 1/"
+            "round_ready,3,Player 2/round_advance,3,Player 2/"
+        ))
+        self.assertEqual(self.messages[-1], {
+            "type": "game_action", "action": "round_advance,3,Player 2"
+        })
+        self.assertEqual(len(self.broadcasts), 3)
+
+        await self.consumer.receive("round_ready,3,Player 1/")
+        self.assertEqual(self.messages[-2:], [
+            {"type": "game_action", "action": "round_ready,3,Player 1"},
+            {"type": "game_action", "action": "round_advance,3,Player 2"},
+        ])
+        self.assertEqual(len(self.broadcasts), 3)
         self.assertEqual(self.game.turns.count("round_advance"), 1)
 
     async def test_missing_round_completion_is_reported(self):
         self.game.turns = ""
+        await self.consumer.receive("round_ready,3,Player 1/")
+        self.assertEqual(self.messages, [{
+            "type": "game_action_error",
+            "action": "round_ready,3,Player 1",
+        }])
+        self.assertEqual(self.game.turns, "")
+        self.assertEqual(self.broadcasts, [])
+
+    async def test_client_cannot_advance_directly_or_use_unknown_player(self):
         await self.consumer.receive("round_advance,3,Player 1/")
+        await self.consumer.receive("round_ready,3,Spectator/")
         self.assertEqual(self.messages, [{
             "type": "game_action_error",
             "action": "round_advance,3,Player 1",
         }])
-        self.assertEqual(self.game.turns, "")
+        self.assertEqual(self.game.turns, "round_complete,3,Player 1/")
+        self.assertEqual(self.broadcasts, [])
+
+    async def test_legacy_advance_rejects_late_readiness(self):
+        self.game.turns += "round_advance,3,Player 1/"
+        await self.consumer.receive("round_ready,3,Player 2/")
+        self.assertEqual(self.messages[-1]["type"], "game_action_error")
         self.assertEqual(self.broadcasts, [])
 
 

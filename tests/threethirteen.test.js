@@ -188,7 +188,7 @@ function finalTurn(loser, winner, round = 3) {
   return ["draw,deck,Player 2", discard];
 }
 
-test("settlement button waits for the final turn and server confirmation", async () => {
+test("both players must confirm before either client advances", async () => {
   const [winner, loser] = await setup();
   for (const client of [winner, loser]) action(client, "round_complete,3,Player 1");
   assert.equal(winner.button().node.enabled, false);
@@ -197,10 +197,19 @@ test("settlement button waits for the final turn and server confirmation", async
   assert.equal(winner.button().node.enabled, true);
   assert.equal(loser.button().node.enabled, true);
   winner.click((node) => node === winner.button().node);
-  assert.equal(winner.socket().sent.at(-1), "round_advance,3,Player 1/");
+  assert.equal(winner.socket().sent.at(-1), "round_ready,3,Player 1/");
   assert.equal(winner.round().node.text, "3");
   assert.equal(winner.button().node.enabled, false);
-  for (const client of [winner, loser]) action(client, "round_advance,3,Player 1");
+  for (const client of [winner, loser]) action(client, "round_ready,3,Player 1");
+  assert.equal(loser.round().node.text, "3");
+  assert.equal(loser.button().node.enabled, true);
+  assert.ok(winner.find((node) => node.text === "Waiting for the other player"));
+  assert.ok(loser.find((node) => node.text === "Other player is ready"));
+  loser.click((node) => node === loser.button().node);
+  assert.equal(loser.socket().sent.at(-1), "round_ready,3,Player 2/");
+  assert.equal(loser.round().node.text, "3");
+  for (const client of [winner, loser]) action(client, "round_ready,3,Player 2");
+  for (const client of [winner, loser]) action(client, "round_advance,3,Player 2");
   assert.equal(winner.round().node.text, "4");
   assert.equal(loser.round().node.text, "4");
   assert.equal(winner.button(), null);
@@ -211,7 +220,7 @@ test("a rejected advance can be retried and a reconnect replays settlement", asy
   for (const client of [winner, loser]) action(client, "round_complete,3,Player 1");
   const finalActions = finalTurn(loser, winner);
   winner.click((node) => node === winner.button().node);
-  winner.socket().receive({ type: "game_action_error", action: "round_advance,3,Player 1" });
+  winner.socket().receive({ type: "game_action_error", action: "round_ready,3,Player 1" });
   assert.equal(winner.button().node.enabled, true);
   winner.click((node) => node === winner.button().node);
   winner.socket().receive({
@@ -221,6 +230,16 @@ test("a rejected advance can be retried and a reconnect replays settlement", asy
   });
   assert.equal(winner.button().node.enabled, true);
   winner.click((node) => node === winner.button().node);
+  action(winner, "round_ready,3,Player 1");
+  winner.socket().receive({
+    type: "game_state",
+    game_id: 42,
+    history: ["round_complete,3,Player 1", ...finalActions, "round_ready,3,Player 1"],
+  });
+  assert.equal(winner.button().node.enabled, false);
+  assert.ok(winner.find((node) => node.text === "Waiting for the other player"));
+  action(winner, "round_ready,3,Player 2");
+  assert.equal(winner.round().node.text, "3");
   action(winner, "round_advance,3,Player 2");
   assert.equal(winner.round().node.text, "4");
 });
@@ -233,10 +252,19 @@ test("all rounds, including the final round, replay with consistent scores", asy
     history.push(complete);
     for (const client of [winner, loser]) action(client, complete);
     history.push(...finalTurn(loser, winner, round));
-    const advance = `round_advance,${round},Player 2`;
+    const firstReady = `round_ready,${round},Player 2`;
+    const secondReady = `round_ready,${round},Player 1`;
+    const advance = `round_advance,${round},Player 1`;
     loser.click((node) => node === loser.button().node);
-    assert.equal(loser.socket().sent.at(-1), advance + "/");
-    history.push(advance);
+    assert.equal(loser.socket().sent.at(-1), firstReady + "/");
+    for (const client of [winner, loser]) action(client, firstReady);
+    winner.click((node) => node === winner.button().node);
+    assert.equal(winner.socket().sent.at(-1), secondReady + "/");
+    for (const client of [winner, loser]) action(client, secondReady);
+    const roundLabel = { 11: "J", 12: "Q", 13: "K" }[round] || String(round);
+    assert.equal(winner.round().node.text, roundLabel);
+    assert.equal(loser.round().node.text, roundLabel);
+    history.push(firstReady, secondReady, advance);
     for (const client of [winner, loser]) action(client, advance);
   }
   assert.ok(winner.find((node) => node.text === "Game complete"));
@@ -250,4 +278,16 @@ test("all rounds, including the final round, replay with consistent scores", asy
   winner.socket().receive({ type: "game_state", game_id: 42, history });
   assert.deepEqual(scores(winner), before);
   assert.ok(winner.find((node) => node.text === "Game complete"));
+});
+
+test("legacy round advances remain replayable", async () => {
+  const [winner, loser] = await setup();
+  for (const client of [winner, loser]) action(client, "round_complete,3,Player 1");
+  const finalActions = finalTurn(loser, winner);
+  winner.socket().receive({
+    type: "game_state",
+    game_id: 42,
+    history: ["round_complete,3,Player 1", ...finalActions, "round_advance,3,Player 1"],
+  });
+  assert.equal(winner.round().node.text, "4");
 });
