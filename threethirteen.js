@@ -764,7 +764,7 @@
     const row1Count = Math.min(7, cardCount);
     const row2Count = cardCount - row1Count;
     const row1Y = 80;
-    const row2Y = 170;
+    const row2Y = 175;
     const cardSpacing = 130;
 
     for (let i = cardCount - 1; i >= 0; i--) {
