@@ -951,7 +951,7 @@
     opponentScoreText.textAlign = "center";
 
     currentPlayerText = new createjs.Text(
-      "☆",
+      "★",
       LARGE_TEXT,
       "#E8CD71"
     );
@@ -1653,7 +1653,7 @@
       "#000000"
     );
 
-    message.x = leftBound + 200;
+    message.x = leftBound + 150;
     message.y = topBound + 672;
     message.textAlign = "center";
     message.mouseEnabled = false;
@@ -1666,7 +1666,7 @@
       "#000000"
     );
 
-    instruction.x = leftBound + 410;
+    instruction.x = leftBound + 240;
     instruction.y = topBound + 674;
     instruction.textAlign = "left";
     instruction.mouseEnabled = false;
