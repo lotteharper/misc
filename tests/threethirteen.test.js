@@ -5,7 +5,7 @@ const vm = require("node:vm");
 
 const source = fs.readFileSync("threethirteen.js", "utf8");
 
-function createClient(player) {
+function createClient(player, location = { protocol: "https:", host: "localhost" }) {
   const stages = [];
   const sockets = [];
   let reconnect;
@@ -121,7 +121,7 @@ function createClient(player) {
     window: {
       innerWidth: 1000,
       innerHeight: 1000,
-      location: { hostname: "localhost" },
+      location,
       addEventListener() {},
     },
     createjs: {
@@ -209,6 +209,15 @@ test("meld ordering uses the scoring hand without changing cards or score", () =
   assert.equal(game.calculateScore(sorted, 7), score);
   assert.deepEqual(cardLabels(cards), original);
   assert.equal(new Set(sorted).size, cards.length);
+});
+
+test("WebSocket URL uses the page's scheme and host, including its port", async () => {
+  const secure = createClient("Player 1", { protocol: "https:", host: "example.com:8443" });
+  const local = createClient("Player 2", { protocol: "http:", host: "localhost:8000" });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(secure.socket().url, "wss://example.com:8443/ws/games/1/code/?player=Player%201");
+  assert.equal(local.socket().url, "ws://localhost:8000/ws/games/1/code/?player=Player%202");
 });
 
 test("meld ordering handles sets with wildcards, duplicates, high aces and wild-only melds", () => {

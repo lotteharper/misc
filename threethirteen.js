@@ -2288,8 +2288,8 @@
     }
 
     socket = new WebSocket(
-      "wss://" +
-      window.location.hostname +
+      (window.location.protocol === "https:" ? "wss://" : "ws://") +
+      window.location.host +
       "/ws/games/" +
       postUuid +
       "/" +
