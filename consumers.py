@@ -424,17 +424,29 @@ class GameConsumer(AsyncWebsocketConsumer):
             await self.close(code=4004)
             return
 
+        query = parse_qs(
+            self.scope.get("query_string", b"").decode("utf-8", errors="replace"),
+            keep_blank_values=True,
+        )
+        players = query.get("player")
+        if players is None:
+            # Older clients identify the host by uid and the guest by code.
+            players = [
+                player for player, player_code in (
+                    ("Player 1", game.uid),
+                    ("Player 2", game.code),
+                )
+                if code == player_code
+            ]
+        if len(players) != 1 or players[0] not in PLAYER_SLOTS:
+            await self.close(code=4000)
+            return
+
         self.game_id = game.id
         self.post_id = post_id
         self.code = code
         self.group_name = f"game_{game.id}"
         self.player_counted = False
-
-        query = parse_qs(self.scope.get("query_string", b"").decode("utf-8", errors="replace"))
-        players = query.get("player", [])
-        if len(players) != 1 or players[0] not in PLAYER_SLOTS:
-            await self.close(code=4000)
-            return
         self.player = players[0]
 
         await self.channel_layer.group_add(
