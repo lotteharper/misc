@@ -4,7 +4,7 @@ import json
 import sys
 import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 
 def load_consumers():
@@ -50,9 +50,14 @@ consumers = load_consumers()
 
 class FakeGame:
     def __init__(self, turns):
+        self.id = 42
         self.turns = turns
         self.turn = ""
         self.begun = False
+        self.players = consumers.BOTH_PLAYERS
+        self.player1_score = None
+        self.player2_score = None
+        self.scored = False
 
     def save(self, update_fields):
         pass
@@ -80,6 +85,7 @@ class ConsumerTests(unittest.IsolatedAsyncioTestCase):
         self.consumer.game_id = 42
         self.consumer.group_name = "game_42"
         self.consumer.channel_name = "sender"
+        self.consumer.player = "Player 1"
         self.messages = []
         self.broadcasts = []
 
@@ -106,6 +112,7 @@ class ConsumerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.game.turns.count("round_ready"), 1)
         self.assertEqual(len(self.broadcasts), 1)
 
+        self.consumer.player = "Player 2"
         await self.consumer.receive("round_ready,3,Player 2/")
         self.assertEqual(self.game.turns, (
             "round_complete,3,Player 1/round_ready,3,Player 1/"
@@ -116,39 +123,123 @@ class ConsumerTests(unittest.IsolatedAsyncioTestCase):
         })
         self.assertEqual(len(self.broadcasts), 3)
 
+        self.consumer.player = "Player 1"
         await self.consumer.receive("round_ready,3,Player 1/")
-        self.assertEqual(self.messages[-2:], [
-            {"type": "game_action", "action": "round_ready,3,Player 1"},
-            {"type": "game_action", "action": "round_advance,3,Player 2"},
-        ])
+        self.assertEqual(self.messages[-1]["type"], "game_state")
+        self.assertIn("round_advance,3,Player 2", self.messages[-1]["history"])
         self.assertEqual(len(self.broadcasts), 3)
         self.assertEqual(self.game.turns.count("round_advance"), 1)
 
     async def test_missing_round_completion_is_reported(self):
         self.game.turns = ""
         await self.consumer.receive("round_ready,3,Player 1/")
-        self.assertEqual(self.messages, [{
-            "type": "game_action_error",
-            "action": "round_ready,3,Player 1",
-        }])
+        self.assertEqual(self.messages[0]["type"], "game_action_error")
+        self.assertEqual(self.messages[0]["action"], "round_ready,3,Player 1")
+        self.assertEqual(self.messages[0]["state"]["history"], [])
         self.assertEqual(self.game.turns, "")
         self.assertEqual(self.broadcasts, [])
 
     async def test_client_cannot_advance_directly_or_use_unknown_player(self):
         await self.consumer.receive("round_advance,3,Player 1/")
         await self.consumer.receive("round_ready,3,Spectator/")
-        self.assertEqual(self.messages, [{
-            "type": "game_action_error",
-            "action": "round_advance,3,Player 1",
-        }])
+        self.assertEqual(self.messages[0]["type"], "game_action_error")
+        self.assertEqual(self.messages[0]["action"], "round_advance,3,Player 1")
         self.assertEqual(self.game.turns, "round_complete,3,Player 1/")
         self.assertEqual(self.broadcasts, [])
 
     async def test_legacy_advance_rejects_late_readiness(self):
         self.game.turns += "round_advance,3,Player 1/"
+        self.consumer.player = "Player 2"
         await self.consumer.receive("round_ready,3,Player 2/")
         self.assertEqual(self.messages[-1]["type"], "game_action_error")
         self.assertEqual(self.broadcasts, [])
+
+    async def test_moves_require_both_distinct_slots_and_correct_actor(self):
+        self.game.turns = ""
+        for slots in (0, 1, 2):
+            self.game.players = slots
+            for action in ("draw,deck,Player 1", "discard,4.2,Player 1",
+                           "round_complete,3,Player 1", "round_ready,3,Player 1"):
+                await self.consumer.receive(action)
+                self.assertEqual(self.messages[-1]["type"], "game_action_error")
+                self.assertFalse(self.messages[-1]["state"]["players_connected"])
+                self.assertEqual(self.game.turns, "")
+
+        self.game.players = consumers.BOTH_PLAYERS
+        await self.consumer.receive("draw,deck,Player 2")
+        self.assertEqual(self.messages[-1]["type"], "game_action_error")
+        self.assertEqual(self.game.turns, "")
+        await self.consumer.receive("draw,deck,Player 1")
+        self.assertEqual(self.game.turns, "draw,deck,Player 1/")
+        self.assertEqual(self.messages[-1], {
+            "type": "game_action", "action": "draw,deck,Player 1",
+        })
+
+        self.game.players = 1
+        await self.consumer.receive("discard,4.2,Player 1")
+        self.assertEqual(self.game.turns, "draw,deck,Player 1/")
+        self.assertEqual(len(self.broadcasts), 1)
+
+    async def test_slot_claims_are_distinct_and_can_be_reclaimed(self):
+        self.game.players = 0
+        self.assertTrue(await consumers.claim_player_slot(42, "Player 1"))
+        self.assertFalse(await consumers.claim_player_slot(42, "Player 1"))
+        self.assertEqual(self.game.players, 1)
+        self.assertTrue(await consumers.claim_player_slot(42, "Player 2"))
+        self.assertEqual(self.game.players, consumers.BOTH_PLAYERS)
+        await consumers.release_player_slot(42, "Player 1")
+        self.assertEqual(self.game.players, 2)
+        self.assertTrue(await consumers.claim_player_slot(42, "Player 1"))
+        self.assertEqual(self.game.players, consumers.BOTH_PLAYERS)
+
+    async def test_connections_broadcast_presence_and_reject_duplicate_slot(self):
+        self.game.players = 0
+        group_events = []
+
+        async def group_add(group, channel):
+            group_events.append(("add", group, channel))
+
+        async def group_discard(group, channel):
+            group_events.append(("discard", group, channel))
+
+        async def group_send(group, event):
+            group_events.append(("send", group, event))
+
+        def make_connection(player, channel):
+            connection = consumers.GameConsumer()
+            connection.scope = {
+                "url_route": {"kwargs": {"id": "1", "code": "code"}},
+                "query_string": ("player=" + player.replace(" ", "+")).encode(),
+            }
+            connection.channel_name = channel
+            connection.channel_layer = types.SimpleNamespace(
+                group_add=group_add, group_discard=group_discard, group_send=group_send,
+            )
+            connection.accept = AsyncMock()
+            connection.close = AsyncMock()
+            connection.send = AsyncMock()
+            return connection
+
+        first = make_connection("Player 1", "first")
+        duplicate = make_connection("Player 1", "duplicate")
+        second = make_connection("Player 2", "second")
+        with patch.object(consumers, "get_game_for_connection", AsyncMock(return_value=self.game)):
+            await first.connect()
+            self.assertFalse(json.loads(first.send.call_args.kwargs["text_data"])["players_connected"])
+            await duplicate.connect()
+            duplicate.close.assert_awaited_once_with(code=4009)
+            self.assertEqual(self.game.players, 1)
+            await second.connect()
+            self.assertTrue(json.loads(second.send.call_args.kwargs["text_data"])["players_connected"])
+            await first.game_presence({})
+            self.assertTrue(json.loads(first.send.call_args.kwargs["text_data"])["players_connected"])
+            await second.disconnect(1000)
+            await first.game_presence({})
+            self.assertFalse(json.loads(first.send.call_args.kwargs["text_data"])["players_connected"])
+            self.assertEqual(self.game.players, 1)
+            await second.connect()
+            self.assertEqual(self.game.players, consumers.BOTH_PLAYERS)
+        self.assertEqual(sum(event[0] == "send" for event in group_events), 4)
 
 
 if __name__ == "__main__":

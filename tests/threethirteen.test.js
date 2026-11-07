@@ -8,6 +8,7 @@ const source = fs.readFileSync("threethirteen.js", "utf8");
 function createClient(player) {
   const stages = [];
   const sockets = [];
+  let reconnect;
 
   class DisplayObject {
     constructor() {
@@ -81,7 +82,8 @@ function createClient(player) {
   class WebSocket {
     static OPEN = 1;
 
-    constructor() {
+    constructor(url) {
+      this.url = url;
       this.readyState = WebSocket.OPEN;
       this.listeners = {};
       this.sent = [];
@@ -98,6 +100,11 @@ function createClient(player) {
 
     receive(message) {
       this.listeners.message({ data: JSON.stringify(message) });
+    }
+
+    close() {
+      this.readyState = 3;
+      this.listeners.close();
     }
   }
 
@@ -121,7 +128,10 @@ function createClient(player) {
       Stage, Container, Shape, Text, Bitmap,
       Ticker: { addEventListener() {} },
     },
-    Image, WebSocket, setTimeout, clearTimeout, console,
+    Image, WebSocket,
+    setTimeout: (callback) => { reconnect = callback; return 1; },
+    clearTimeout: () => { reconnect = null; },
+    console,
   };
   const instrumentedSource = source.replace(/\}\)\(\);\s*$/, `
     globalThis.testGame = {
@@ -132,6 +142,7 @@ function createClient(player) {
         drawOpponentHand(false);
       },
       opponentCards: () => opponentCards,
+      playerCards: () => playerCards,
       opponentObjects: () => opponentObjects
     };
   })();`);
@@ -162,7 +173,8 @@ function createClient(player) {
 
   return {
     game: context.testGame,
-    socket: () => sockets[0],
+    socket: () => sockets.at(-1),
+    reconnect: () => reconnect(),
     find,
     click,
     button: () => find((node) =>
@@ -264,7 +276,7 @@ async function setup() {
   const second = createClient("Player 2");
   await new Promise((resolve) => setImmediate(resolve));
   for (const client of [first, second]) {
-    client.socket().receive({ type: "game_state", game_id: 42, history: [] });
+    client.socket().receive({ type: "game_state", game_id: 42, history: [], players_connected: true });
   }
   return [first, second];
 }
@@ -277,10 +289,12 @@ function finalTurn(loser, winner, round = 3) {
   loser.click((node) => node instanceof Object && node.image &&
     node.image.url.endsWith("/back.png") && node.x === 187.5 && node.y === 342.5);
   assert.equal(loser.socket().sent.at(-1), "draw,deck,Player 2/");
+  action(loser, "draw,deck,Player 2");
   action(winner, "draw,deck,Player 2");
   loser.click((node) => node.cardValue !== undefined && node.cardValue !== round - 1);
   const discard = loser.socket().sent.at(-1).slice(0, -1);
   assert.match(discard, /^discard,\d+\.\d+,Player 2$/);
+  action(loser, discard);
   action(winner, discard);
   return ["draw,deck,Player 2", discard];
 }
@@ -317,12 +331,17 @@ test("a rejected advance can be retried and a reconnect replays settlement", asy
   for (const client of [winner, loser]) action(client, "round_complete,3,Player 1");
   const finalActions = finalTurn(loser, winner);
   winner.click((node) => node === winner.button().node);
-  winner.socket().receive({ type: "game_action_error", action: "round_ready,3,Player 1" });
+  winner.socket().receive({
+    type: "game_action_error", action: "round_ready,3,Player 1",
+    state: { type: "game_state", game_id: 42, players_connected: true,
+      history: ["round_complete,3,Player 1", ...finalActions] },
+  });
   assert.equal(winner.button().node.enabled, true);
   winner.click((node) => node === winner.button().node);
   winner.socket().receive({
     type: "game_state",
     game_id: 42,
+    players_connected: true,
     history: ["round_complete,3,Player 1", ...finalActions],
   });
   assert.equal(winner.button().node.enabled, true);
@@ -331,6 +350,7 @@ test("a rejected advance can be retried and a reconnect replays settlement", asy
   winner.socket().receive({
     type: "game_state",
     game_id: 42,
+    players_connected: true,
     history: ["round_complete,3,Player 1", ...finalActions, "round_ready,3,Player 1"],
   });
   assert.equal(winner.button().node.enabled, false);
@@ -372,7 +392,7 @@ test("all rounds, including the final round, replay with consistent scores", asy
   ];
   assert.deepEqual(scores(winner), scores(loser).reverse());
   const before = scores(winner);
-  winner.socket().receive({ type: "game_state", game_id: 42, history });
+  winner.socket().receive({ type: "game_state", game_id: 42, history, players_connected: true });
   assert.deepEqual(scores(winner), before);
   assert.ok(winner.find((node) => node.text === "Game complete"));
 });
@@ -384,7 +404,86 @@ test("legacy round advances remain replayable", async () => {
   winner.socket().receive({
     type: "game_state",
     game_id: 42,
+    players_connected: true,
     history: ["round_complete,3,Player 1", ...finalActions, "round_advance,3,Player 1"],
   });
   assert.equal(winner.round().node.text, "4");
+});
+
+test("moves wait for both players and for server confirmation", async () => {
+  const client = createClient("Player 1");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(client.socket().url, /player=Player%201$/);
+  const deck = () => client.click((node) => node.image &&
+    node.image.url.endsWith("/back.png") && node.x === 187.5 && node.y === 342.5);
+  client.socket().receive({ type: "game_state", game_id: 42, history: [], players_connected: false });
+  assert.ok(client.find((node) => node.text === "Waiting for both players to connect"));
+  deck();
+  assert.equal(client.socket().sent.length, 0);
+  assert.equal(client.game.playerCards().length, 3);
+
+  client.socket().receive({ type: "game_presence", players_connected: true });
+  deck();
+  assert.deepEqual(client.socket().sent, ["draw,deck,Player 1/"]);
+  assert.equal(client.game.playerCards().length, 3);
+  deck();
+  assert.equal(client.socket().sent.length, 1);
+  action(client, "draw,deck,Player 1");
+  assert.equal(client.game.playerCards().length, 4);
+
+  client.socket().receive({ type: "game_presence", players_connected: false });
+  client.click((node) => node.cardValue !== undefined && node.cardValue !== 2);
+  assert.equal(client.socket().sent.length, 1);
+  assert.equal(client.game.playerCards().length, 4);
+  client.socket().receive({ type: "game_presence", players_connected: true });
+  client.click((node) => node.cardValue !== undefined && node.cardValue !== 2);
+  assert.match(client.socket().sent.at(-1), /^discard,/);
+  assert.equal(client.game.playerCards().length, 4);
+});
+
+test("rejected and disconnected moves recover from authoritative history", async () => {
+  const [client] = await setup();
+  const deck = () => client.click((node) => node.image &&
+    node.image.url.endsWith("/back.png") && node.x === 187.5 && node.y === 342.5);
+  deck();
+  client.socket().receive({
+    type: "game_action_error", action: "draw,deck,Player 1",
+    state: { type: "game_state", game_id: 42, history: [], players_connected: false },
+  });
+  assert.equal(client.game.playerCards().length, 3);
+  deck();
+  assert.equal(client.socket().sent.length, 1);
+
+  client.socket().receive({ type: "game_presence", players_connected: true });
+  deck();
+  client.socket().close();
+  deck();
+  assert.equal(client.socket().sent.length, 2);
+  client.reconnect();
+  client.socket().receive({
+    type: "game_state", game_id: 42,
+    history: ["draw,deck,Player 1"], players_connected: true,
+  });
+  assert.equal(client.game.playerCards().length, 4);
+  client.click((node) => node.cardValue !== undefined && node.cardValue !== 2);
+  assert.match(client.socket().sent.at(-1), /^discard,/);
+});
+
+test("replaying a completed turn preserves whose turn is next", async () => {
+  const [first, second] = await setup();
+  const deck = (client) => client.click((node) => node.image &&
+    node.image.url.endsWith("/back.png") && node.x === 187.5 && node.y === 342.5);
+  deck(first);
+  action(first, "draw,deck,Player 1");
+  first.click((node) => node.cardValue !== undefined && node.cardValue !== 2);
+  const discard = first.socket().sent.at(-1).slice(0, -1);
+  const history = ["draw,deck,Player 1", discard];
+  for (const client of [first, second]) {
+    client.socket().receive({ type: "game_state", game_id: 42, history, players_connected: true });
+  }
+  const firstCount = first.socket().sent.length;
+  deck(first);
+  assert.equal(first.socket().sent.length, firstCount);
+  deck(second);
+  assert.equal(second.socket().sent.at(-1), "draw,deck,Player 2/");
 });
