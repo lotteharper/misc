@@ -1,4 +1,5 @@
 import contextlib
+import asyncio
 import importlib.util
 import json
 import sys
@@ -193,6 +194,38 @@ class ConsumerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.game.players, 2)
         self.assertTrue(await consumers.claim_player_slot(42, "Player 1"))
         self.assertEqual(self.game.players, consumers.BOTH_PLAYERS)
+
+    async def test_disconnect_blocks_moves_before_group_cleanup_finishes(self):
+        self.game.turns = ""
+        disconnecting = consumers.GameConsumer()
+        disconnecting.game_id = 42
+        disconnecting.group_name = "game_42"
+        disconnecting.channel_name = "opponent"
+        disconnecting.player = "Player 2"
+        disconnecting.player_counted = True
+        cleanup_started = asyncio.Event()
+        finish_cleanup = asyncio.Event()
+
+        async def group_discard(group, channel):
+            cleanup_started.set()
+            await finish_cleanup.wait()
+
+        disconnecting.channel_layer = types.SimpleNamespace(
+            group_discard=group_discard,
+            group_send=AsyncMock(),
+        )
+        task = asyncio.create_task(disconnecting.disconnect(1000))
+        try:
+            await cleanup_started.wait()
+            self.assertEqual(self.game.players, 1)
+            disconnecting.channel_layer.group_send.assert_awaited_once()
+            await self.consumer.receive("draw,deck,Player 1")
+            self.assertEqual(self.game.turns, "")
+            self.assertEqual(self.messages[-1]["type"], "game_action_error")
+            self.assertFalse(self.messages[-1]["state"]["players_connected"])
+        finally:
+            finish_cleanup.set()
+            await task
 
     async def test_connections_broadcast_presence_and_reject_duplicate_slot(self):
         self.game.players = 0

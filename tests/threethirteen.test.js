@@ -28,6 +28,10 @@ function createClient(player, location = { protocol: "https:", host: "localhost"
     }
 
     addChild(...children) {
+      for (const child of children) {
+        const index = this.children.indexOf(child);
+        if (index >= 0) this.children.splice(index, 1);
+      }
       this.children.push(...children);
     }
 
@@ -427,6 +431,9 @@ test("moves wait for both players and for server confirmation", async () => {
     node.image.url.endsWith("/back.png") && node.x === 187.5 && node.y === 342.5);
   client.socket().receive({ type: "game_state", game_id: 42, history: [], players_connected: false });
   assert.ok(client.find((node) => node.text === "Waiting for both players to connect"));
+  const container = client.find((node) => node.children && node.children.some((child) =>
+    child.text === "Waiting for both players to connect")).node;
+  assert.equal(container.children.at(-1).text, "Waiting for both players to connect");
   deck();
   assert.equal(client.socket().sent.length, 0);
   assert.equal(client.game.playerCards().length, 3);
@@ -476,6 +483,30 @@ test("rejected and disconnected moves recover from authoritative history", async
   assert.equal(client.game.playerCards().length, 4);
   client.click((node) => node.cardValue !== undefined && node.cardValue !== 2);
   assert.match(client.socket().sent.at(-1), /^discard,/);
+});
+
+test("the second player cannot draw from either pile without the opponent", async () => {
+  const [first, second] = await setup();
+  first.click((node) => node.image &&
+    node.image.url.endsWith("/back.png") && node.x === 187.5 && node.y === 342.5);
+  action(first, "draw,deck,Player 1");
+  first.click((node) => node.cardValue !== undefined && node.cardValue !== 2);
+  const discard = first.socket().sent.at(-1).slice(0, -1);
+  second.socket().receive({
+    type: "game_state", game_id: 42, players_connected: false,
+    history: ["draw,deck,Player 1", discard],
+  });
+  const deck = () => second.click((node) => node.image &&
+    node.image.url.endsWith("/back.png") && node.x === 187.5 && node.y === 342.5);
+  const discardPile = () => second.click((node) => node.image &&
+    !node.image.url.endsWith("/back.png") && node.x === 587.5 && node.y === 342.5);
+
+  deck();
+  discardPile();
+  assert.equal(second.socket().sent.length, 0);
+  second.socket().receive({ type: "game_presence", players_connected: true });
+  discardPile();
+  assert.equal(second.socket().sent.at(-1), "draw,discard,Player 2/");
 });
 
 test("replaying a completed turn preserves whose turn is next", async () => {
