@@ -475,18 +475,19 @@ class GameConsumer(AsyncWebsocketConsumer):
         await self.broadcast_presence()
 
     async def disconnect(self, close_code):
-        if getattr(self, "group_name", None):
-            await self.channel_layer.group_discard(
-                self.group_name,
-                self.channel_name,
-            )
-
         if (
             getattr(self, "player_counted", False)
             and getattr(self, "game_id", None) is not None
         ):
             await release_player_slot(self.game_id, self.player)
+            self.player_counted = False
             await self.broadcast_presence()
+
+        if getattr(self, "group_name", None):
+            await self.channel_layer.group_discard(
+                self.group_name,
+                self.channel_name,
+            )
 
         self.player_counted = False
 

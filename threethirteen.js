@@ -500,6 +500,7 @@
       : !playersConnected
         ? "Waiting for both players to connect"
         : "";
+    container.addChild(connectionText);
     updateSettlementAdvanceButton();
     stage.update();
   }
