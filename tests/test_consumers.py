@@ -51,6 +51,8 @@ consumers = load_consumers()
 class FakeGame:
     def __init__(self, turns):
         self.id = 42
+        self.uid = "host-code"
+        self.code = "guest-code"
         self.turns = turns
         self.turn = ""
         self.begun = False
@@ -240,6 +242,69 @@ class ConsumerTests(unittest.IsolatedAsyncioTestCase):
             await second.connect()
             self.assertEqual(self.game.players, consumers.BOTH_PLAYERS)
         self.assertEqual(sum(event[0] == "send" for event in group_events), 4)
+
+    async def test_legacy_connections_use_game_codes_to_claim_distinct_slots(self):
+        self.game.players = 0
+        self.game.code = "3559"
+
+        def make_connection(code, query=b""):
+            connection = consumers.GameConsumer()
+            connection.scope = {
+                "url_route": {"kwargs": {"id": "101", "code": code}},
+                "query_string": query,
+            }
+            connection.channel_name = code
+            connection.channel_layer = types.SimpleNamespace(
+                group_add=AsyncMock(), group_discard=AsyncMock(), group_send=AsyncMock(),
+            )
+            connection.accept = AsyncMock()
+            connection.close = AsyncMock()
+            connection.send = AsyncMock()
+            return connection
+
+        host = make_connection("host-code")
+        guest = make_connection("3559", b"other=value")
+        duplicate = make_connection("host-code")
+        with patch.object(consumers, "get_game_for_connection", AsyncMock(return_value=self.game)):
+            await host.connect()
+            host.accept.assert_awaited_once()
+            self.assertEqual(host.player, "Player 1")
+            self.assertFalse(json.loads(host.send.call_args.kwargs["text_data"])["players_connected"])
+            await guest.connect()
+            guest.accept.assert_awaited_once()
+            self.assertEqual(guest.player, "Player 2")
+            self.assertTrue(json.loads(guest.send.call_args.kwargs["text_data"])["players_connected"])
+            await duplicate.connect()
+            duplicate.close.assert_awaited_once_with(code=4009)
+            self.assertEqual(self.game.players, consumers.BOTH_PLAYERS)
+            await host.receive("draw,deck,Player 1/")
+            self.assertEqual(self.game.turns, "round_complete,3,Player 1/draw,deck,Player 1/")
+            await host.disconnect(1000)
+            self.assertEqual(self.game.players, 2)
+
+    async def test_missing_or_invalid_player_cannot_select_an_ambiguous_slot(self):
+        self.game.players = 0
+
+        async def reject(code, query):
+            connection = consumers.GameConsumer()
+            connection.scope = {
+                "url_route": {"kwargs": {"id": "101", "code": code}},
+                "query_string": query,
+            }
+            connection.accept = AsyncMock()
+            connection.close = AsyncMock()
+            await connection.connect()
+            connection.close.assert_awaited_once_with(code=4000)
+            connection.accept.assert_not_awaited()
+
+        with patch.object(consumers, "get_game_for_connection", AsyncMock(return_value=self.game)):
+            await reject("unknown", b"")
+            await reject("host-code", b"player=")
+            await reject("host-code", b"player=Player+1&player=Player+2")
+            await reject("host-code", b"player=Spectator")
+            self.game.code = self.game.uid
+            await reject("host-code", b"")
+        self.assertEqual(self.game.players, 0)
 
 
 if __name__ == "__main__":
