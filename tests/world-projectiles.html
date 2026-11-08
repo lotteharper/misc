@@ -1,0 +1,148 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>World and projectile tests</title>
+<pre id="result">Running...</pre>
+<iframe id="game" src="../index.html" width="320" height="240"></iframe>
+<script>
+  function runTests() {
+    const failures = [];
+    const assert = (condition, message) => { if (!condition) failures.push(message); };
+    const baseY = WORLD_MIN_Y;
+    const baseKey = blockKey(0, baseY, 0);
+    assert(RENDER_RADIUS === 64, "render distance is 64");
+    blockEdits.set(baseKey, null);
+    assert(getBlock(0, baseY, 0)?.type === "bedrock" &&
+      getBlock(0, baseY, 0).color === BASE_COLOR, "saved edits cannot remove the dark base");
+    removeBlock(0, baseY, 0);
+    assert(getBlock(0, baseY, 0)?.type === "bedrock", "base cannot be removed");
+
+    camera.pos = [0.5, baseY + 2, 0.5];
+    camera.rot = [-Math.PI / 2 + 0.01, 0];
+    for (let y = baseY + 1; y <= baseY + 4; y++) {
+      blockEdits.set(blockKey(0, y, 0), null);
+    }
+    const hit = raycast();
+    assert(hit?.hit[1] === baseY && hit.previous[1] === baseY + 1,
+      "raycast selects the base and its upper placement cell");
+    startMining("test");
+    updateMining(0);
+    updateMining(5000);
+    assert(getBlock(0, baseY, 0)?.type === "bedrock" &&
+      mineProgressElement.style.display === "none", "mining cannot damage the base");
+    stopMining("test");
+    selectedSlot = 0;
+    inventory[0] = { type: "stone", color: ITEM_DEFINITIONS.stone.color, count: 1 };
+    camera.pos = [0.5, baseY + 2.1, 0.5];
+    lastSuccessfulPlacementAt = -Infinity;
+    placeBlock();
+    assert(getBlock(0, baseY + 1, 0)?.type === "stone", "blocks can be placed on the base");
+
+    camera.pos = [0.5, 100, 0.5];
+    camera.rot = [0, 0];
+    inventory.fill(null);
+    inventory[0] = { type: "bow", color: ITEM_DEFINITIONS.bow.color, count: 1 };
+    inventory[1] = { type: "arrows", color: ITEM_DEFINITIONS.arrows.color, count: 3 };
+    const wall = { x: 0, y: 101, z: 5, type: "stone", color: ITEM_DEFINITIONS.stone.color };
+    blockEdits.set(blockKey(wall.x, wall.y, wall.z), wall);
+    attackTarget();
+    assert(arrows.length === 1 && countInventoryItem("arrows") === 2, "firing creates an arrow and consumes ammunition");
+    rendererState.render();
+    assert(rendererState.arrowMeshes.has(arrows[0]), "fired arrow has visible geometry");
+    for (let i = 0; i < 20; i++) updateArrows(0.05);
+    assert(arrows.length === 1 && arrows[0].stuck, "missed arrow stops at a block");
+    camera.pos = [arrows[0].position[0], arrows[0].position[1] - PLAYER_HEIGHT / 2, arrows[0].position[2]];
+    const savedInventory = inventory.map(item => item && { ...item });
+    inventory.fill(null);
+    for (let i = 0; i < inventory.length; i++) {
+      inventory[i] = { type: "stone", color: ITEM_DEFINITIONS.stone.color, count: 64 };
+    }
+    updateArrows(0.05);
+    assert(arrows.length === 1, "arrow remains when inventory is full");
+    savedInventory.forEach((item, index) => { inventory[index] = item; });
+    updateArrows(0.05);
+    assert(arrows.length === 0 && countInventoryItem("arrows") === 3, "stuck arrow can be picked up");
+    rendererState.render();
+    assert(rendererState.arrowMeshes.size === 0, "picked-up arrow geometry is removed");
+
+    camera.pos = [0.5, 100, 0.5];
+    const sent = [];
+    const socket = worldSocket;
+    worldSocket = { readyState: WebSocket.OPEN, send: data => sent.push(JSON.parse(data)) };
+    remotePlayers.set("target", { x: 0.5, y: 100, z: 3 });
+    attackTarget();
+    for (let i = 0; i < 10; i++) updateArrows(0.05);
+    assert(arrows.length === 0 && sent.some(message => message.type === "combat" &&
+      message.target_id === "target" && message.damage === 5), "arrow collision damages a player");
+
+    remotePlayers.set("target", { x: 0.5, y: 100, z: 7 });
+    sent.length = 0;
+    attackTarget();
+    for (let i = 0; i < 10; i++) updateArrows(0.05);
+    assert(arrows.length === 1 && arrows[0].stuck &&
+      !sent.some(message => message.type === "combat"), "wall blocks arrows and player damage");
+    arrows.length = 0;
+    remotePlayers.clear();
+    hasLoadedServerState = true;
+    localPlayerId = "local";
+    camera.pos = [0.5, 100, 0.5];
+    inventory[1] = { type: "arrows", color: ITEM_DEFINITIONS.arrows.color, count: 2 };
+    sent.length = 0;
+    attackTarget();
+    const spawn = sent.find(message => message.type === "arrow_spawn");
+    assert(spawn && spawn.arrow_id === arrows[0].id, "firing broadcasts the projectile");
+    handleArrowMessage({ ...spawn, owner_id: "local" });
+    assert(arrows.length === 1, "own spawn broadcast does not duplicate the projectile");
+    arrows.length = 0;
+    const remoteId = "c9592f76-a6ee-43df-bffa-30f17dff2d68";
+    handleArrowMessage({ type: "arrow_spawn", arrow_id: remoteId, owner_id: "other",
+      position: [0.5, 100.85, 0.5], direction: [0, 0, 1] });
+    rendererState.render();
+    assert(arrows.length === 1 && rendererState.arrowMeshes.has(arrows[0]),
+      "other players' arrows are rendered");
+    handleArrowMessage({ type: "arrow_land", arrow_id: remoteId,
+      position: [0.5, 100.85, 0.5], direction: [0, 0, 1] });
+    sent.length = 0;
+    updateArrows(1);
+    assert(sent.some(message => message.type === "arrow_pickup" && message.arrow_id === remoteId),
+      "nearby shared arrows request pickup");
+    const serverInventory = inventoryPayload();
+    serverInventory[1].count++;
+    handleArrowMessage({ type: "arrow_picked_up", arrow_id: remoteId, inventory: serverInventory });
+    assert(arrows.length === 0 && countInventoryItem("arrows") === 2,
+      "successful pickup applies the server inventory once");
+    handleArrowMessage({ type: "arrow_picked_up", arrow_id: remoteId, inventory: serverInventory });
+    assert(countInventoryItem("arrows") === 2, "duplicate pickup acknowledgement is ignored");
+    const secondId = "468d7fd9-cdbd-473d-92d5-954b6e783b22";
+    handleArrowMessage({ type: "arrow_land", arrow_id: secondId,
+      position: [0.5, 100.85, 0.5], direction: [0, 0, 1] });
+    updateArrows(0.05);
+    const pendingInventory = inventoryPayload();
+    pendingInventory[1].count++;
+    for (let i = 0; i < inventory.length; i++) {
+      inventory[i] = { type: "stone", color: ITEM_DEFINITIONS.stone.color, count: 64 };
+    }
+    sent.length = 0;
+    syncInventory();
+    assert(!sent.some(message => message.type === "inventory"),
+      "inventory changes wait for the pending pickup");
+    handleArrowMessage({ type: "arrow_picked_up", arrow_id: secondId, inventory: pendingInventory });
+    assert(pendingArrowCredits === 1, "pickup is retained if inventory fills while awaiting confirmation");
+    inventory[3] = null;
+    updateArrows(0.05);
+    assert(pendingArrowCredits === 0 && countInventoryItem("arrows") === 1,
+      "retained pickup is added when space becomes available");
+    hasLoadedServerState = false;
+    worldSocket = socket;
+    return failures;
+  }
+
+  document.getElementById("game").addEventListener("load", event => {
+    const result = document.getElementById("result");
+    try {
+      const failures = event.target.contentWindow.eval(`(${runTests.toString()})()`);
+      result.textContent = failures.length ? `FAIL\n${failures.join("\n")}` : "PASS";
+    } catch (error) {
+      result.textContent = `FAIL\n${error.stack}`;
+    }
+  });
+</script>

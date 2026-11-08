@@ -45,9 +45,16 @@ function createVoxelRenderer() {
   const avatarHeadGeometry = new THREE.BoxGeometry(0.42, 0.42, 0.42);
   const doorGeometry = new THREE.BoxGeometry(1, 1, DOOR_THICKNESS);
   const avatarHeadMaterial = new THREE.MeshLambertMaterial({ color: 0xe4bd96 });
+  const arrowShaftGeometry = new THREE.BoxGeometry(0.06, 0.06, 0.7);
+  const arrowTipGeometry = new THREE.ConeGeometry(0.09, 0.18, 4);
+  const arrowFletchingGeometry = new THREE.BoxGeometry(0.18, 0.18, 0.12);
+  const arrowShaftMaterial = new THREE.MeshLambertMaterial({ color: 0x9b6738 });
+  const arrowTipMaterial = new THREE.MeshLambertMaterial({ color: 0xc7cbd0 });
+  const arrowFletchingMaterial = new THREE.MeshLambertMaterial({ color: 0xf3eee2 });
   const chunks = new Map();
   const dirty = new Set();
   const avatars = new Map();
+  const arrowMeshes = new Map();
   const doorSwings = new Map();
   let band = null;
 
@@ -248,6 +255,36 @@ function createVoxelRenderer() {
     }
   }
 
+  function updateArrowMeshes() {
+    const active = new Set(arrows);
+    for (const [arrow, mesh] of arrowMeshes) {
+      if (!active.has(arrow)) {
+        world.remove(mesh);
+        arrowMeshes.delete(arrow);
+      }
+    }
+    for (const arrow of arrows) {
+      let group = arrowMeshes.get(arrow);
+      if (!group) {
+        group = new THREE.Group();
+        const shaft = new THREE.Mesh(arrowShaftGeometry, arrowShaftMaterial);
+        const tip = new THREE.Mesh(arrowTipGeometry, arrowTipMaterial);
+        tip.rotation.x = Math.PI / 2;
+        tip.position.z = 0.44;
+        const fletching = new THREE.Mesh(arrowFletchingGeometry, arrowFletchingMaterial);
+        fletching.position.z = -0.29;
+        group.add(shaft, tip, fletching);
+        world.add(group);
+        arrowMeshes.set(arrow, group);
+      }
+      group.position.set(...arrow.position);
+      group.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 0, 1),
+        new THREE.Vector3(...arrow.direction).normalize()
+      );
+    }
+  }
+
   function updateLighting() {
     const cycle = 30 * 60 * 1000;
     const phase = (Date.now() % cycle) / cycle;
@@ -323,6 +360,7 @@ function createVoxelRenderer() {
       view.position.z + Math.cos(yaw) * Math.cos(pitch));
     updateDoors(frameDeltaMs);
     updateAvatars();
+    updateArrowMeshes();
     updateLighting();
     renderer.render(scene, view);
   }
@@ -336,5 +374,5 @@ function createVoxelRenderer() {
     view.updateProjectionMatrix();
   }
 
-  return { render, resize, invalidate, invalidateAll, scene, view, chunks, renderer };
+  return { render, resize, invalidate, invalidateAll, scene, view, chunks, renderer, arrowMeshes };
 }
