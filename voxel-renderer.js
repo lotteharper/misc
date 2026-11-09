@@ -320,7 +320,8 @@ function createVoxelRenderer() {
         scene.add(group);
         arrowMeshes.set(arrow, group);
       }
-      group.position.set(-arrow.position[0], arrow.position[1], arrow.position[2]);
+      const position = arrow.pickupPosition || arrow.position;
+      group.position.set(-position[0], position[1], position[2]);
       group.quaternion.setFromUnitVectors(
         new THREE.Vector3(0, 0, 1),
         new THREE.Vector3(-arrow.direction[0], arrow.direction[1], arrow.direction[2]).normalize()
@@ -358,7 +359,9 @@ function createVoxelRenderer() {
         scene.add(sprite);
         dropMeshes.set(drop, sprite);
       }
-      sprite.position.set(-drop.position[0], drop.fallY ?? drop.position[1], drop.position[2]);
+      const position = drop.pickupPosition ||
+        [drop.position[0], drop.fallY ?? drop.position[1], drop.position[2]];
+      sprite.position.set(-position[0], position[1], position[2]);
     }
   }
 

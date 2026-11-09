@@ -17,6 +17,7 @@ COLOR_PATTERN = re.compile(r"^#[0-9a-fA-F]{6}$")
 EMPTY_INVENTORY = [None] * 27
 MAX_WORLD_COORDINATE = 1_000_000
 WORLD_MIN_Y = -24
+ITEM_PICKUP_RANGE = 5
 
 # Keep these item type names in sync with the game's JavaScript.
 ITEM_TYPES = {
@@ -592,7 +593,7 @@ class WorldConsumer(AsyncWebsocketConsumer):
             if arrow is None or self.last_position is None:
                 return None
             position = self.last_position
-            if math.dist(arrow.position, [position["x"], position["y"] + 0.85, position["z"]]) > 1.75:
+            if math.dist(arrow.position, [position["x"], position["y"] + 0.85, position["z"]]) > ITEM_PICKUP_RANGE:
                 return None
             player = WorldPlayer.objects.select_for_update().filter(
                 user_id=self.user_id, room=self.room,
@@ -661,7 +662,7 @@ class WorldConsumer(AsyncWebsocketConsumer):
             if drop is None or self.last_position is None or drop.item_type not in DROP_COLORS:
                 return None
             pos = self.last_position
-            if math.dist(drop.position, [pos["x"], pos["y"] + 0.85, pos["z"]]) > 1.75:
+            if math.dist(drop.position, [pos["x"], pos["y"] + 0.85, pos["z"]]) > ITEM_PICKUP_RANGE:
                 return None
             player = WorldPlayer.objects.select_for_update().filter(
                 user_id=self.user_id, room=self.room,

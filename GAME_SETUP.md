@@ -10,5 +10,6 @@ saplings and apples; it must exist before deploying the updated consumer.
 Leaf decay runs near active players. Unsupported leaves disappear gradually and
 drop saplings and apples as they decay. An intact tree canopy yields at least
 three saplings and apples; drops fall from the leaves and remain on the ground
-until collected. Walk over an item to collect it; apples can be eaten when
-health is below maximum.
+until collected. Saplings, apples, and landed arrows within five blocks move
+toward the player and are collected when there is room in the inventory;
+apples can be eaten when health is below maximum.
