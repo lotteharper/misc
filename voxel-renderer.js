@@ -55,6 +55,8 @@ function createVoxelRenderer() {
   const dirty = new Set();
   const avatars = new Map();
   const arrowMeshes = new Map();
+  const dropMeshes = new Map();
+  const dropTextures = new Map();
   const doorSwings = new Map();
   let band = null;
 
@@ -133,6 +135,34 @@ function createVoxelRenderer() {
         quad(arrays.terrain, [[x + 0.88, y, z + 0.12], [x + 0.12, y, z + 0.88],
           [x + 0.12, y + height, z + 0.88], [x + 0.88, y + height, z + 0.12]],
         [Math.SQRT1_2, 0, Math.SQRT1_2], color);
+        return;
+      }
+
+      const direction = type === "torch" ? torchDirection(block.color) : null;
+      if (direction) {
+        const [dx, dz] = direction;
+        const sine = Math.sin(Math.PI / 6), cosine = Math.cos(Math.PI / 6);
+        const baseX = x + 0.5 - dx * (0.5 - 0.09 * cosine);
+        const baseZ = z + 0.5 - dz * (0.5 - 0.09 * cosine);
+        const transform = (u, v, w, point) => {
+          const along = u * cosine + v * sine;
+          return [dx * along - dz * w + (point ? baseX : 0),
+            -u * sine + v * cosine + (point ? y + 0.28 : 0),
+            dz * along + dx * w + (point ? baseZ : 0)];
+        };
+        const faces = [
+          [[0, 0, -1], [[-0.09, 0, -0.09], [0.09, 0, -0.09], [0.09, 0.72, -0.09], [-0.09, 0.72, -0.09]]],
+          [[0, 0, 1], [[0.09, 0, 0.09], [-0.09, 0, 0.09], [-0.09, 0.72, 0.09], [0.09, 0.72, 0.09]]],
+          [[0, -1, 0], [[-0.09, 0, 0.09], [0.09, 0, 0.09], [0.09, 0, -0.09], [-0.09, 0, -0.09]]],
+          [[0, 1, 0], [[-0.09, 0.72, -0.09], [0.09, 0.72, -0.09], [0.09, 0.72, 0.09], [-0.09, 0.72, 0.09]]],
+          [[-1, 0, 0], [[-0.09, 0, 0.09], [-0.09, 0, -0.09], [-0.09, 0.72, -0.09], [-0.09, 0.72, 0.09]]],
+          [[1, 0, 0], [[0.09, 0, -0.09], [0.09, 0, 0.09], [0.09, 0.72, 0.09], [0.09, 0.72, -0.09]]]
+        ];
+        for (const [normal, points] of faces) {
+          quad(arrays.torch, points.map(p => transform(...p, true)),
+            transform(...normal, false), ITEM_DEFINITIONS.torch.color);
+        }
+        torches.push(transform(0, 0.72, 0, true));
         return;
       }
 
@@ -285,6 +315,40 @@ function createVoxelRenderer() {
     }
   }
 
+  function updateDropMeshes() {
+    const active = new Set(drops);
+    for (const [drop, mesh] of dropMeshes) {
+      if (!active.has(drop)) {
+        world.remove(mesh);
+        mesh.material.dispose();
+        dropMeshes.delete(drop);
+      }
+    }
+    for (const drop of drops) {
+      let sprite = dropMeshes.get(drop);
+      if (!sprite) {
+        let texture = dropTextures.get(drop.type);
+        if (!texture) {
+          const image = document.createElement("canvas");
+          image.width = image.height = 128;
+          const context = image.getContext("2d");
+          context.font = "96px sans-serif";
+          context.textAlign = "center";
+          context.textBaseline = "middle";
+          context.fillText(itemIcon(drop.type), 64, 68);
+          texture = new THREE.CanvasTexture(image);
+          texture.colorSpace = THREE.SRGBColorSpace;
+          dropTextures.set(drop.type, texture);
+        }
+        sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true }));
+        sprite.scale.set(0.65, 0.65, 1);
+        world.add(sprite);
+        dropMeshes.set(drop, sprite);
+      }
+      sprite.position.set(...drop.position);
+    }
+  }
+
   function updateLighting() {
     const cycle = 30 * 60 * 1000;
     const phase = (Date.now() % cycle) / cycle;
@@ -361,6 +425,7 @@ function createVoxelRenderer() {
     updateDoors(frameDeltaMs);
     updateAvatars();
     updateArrowMeshes();
+    updateDropMeshes();
     updateLighting();
     renderer.render(scene, view);
   }
@@ -374,5 +439,5 @@ function createVoxelRenderer() {
     view.updateProjectionMatrix();
   }
 
-  return { render, resize, invalidate, invalidateAll, scene, view, chunks, renderer, arrowMeshes };
+  return { render, resize, invalidate, invalidateAll, scene, view, chunks, renderer, arrowMeshes, dropMeshes };
 }

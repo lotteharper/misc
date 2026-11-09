@@ -1,0 +1,131 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Torch and leaf decay tests</title>
+<pre id="result">Running...</pre>
+<iframe id="game" src="../index.html" width="320" height="240"></iframe>
+<script>
+  function runTests() {
+    const failures = [];
+    const assert = (condition, message) => { if (!condition) failures.push(message); };
+    const socket = worldSocket;
+    hasLoadedServerState = false;
+    camera.pos = [100.5, 100, 100.5];
+    for (const [i, direction] of TORCH_DIRECTIONS.entries()) {
+      const x = 96 + i * 8, y = 104, z = 100;
+      const color = torchColorForFace([x - direction[0], y, z - direction[1]], [x, y, z]);
+      assert(itemTypeFromColor(color) === "torch", "wall torch color round-trips");
+      blockEdits.set(blockKey(x, y, z), { x, y, z, color, type: "torch" });
+    }
+    for (let i = 0; i < 80; i++) rendererState.render();
+    for (const [i, [dx, dz]] of TORCH_DIRECTIONS.entries()) {
+      const x = 96 + i * 8, y = 104, z = 100;
+      const chunk = rendererState.chunks.get(`${Math.floor(x / 8)},${Math.floor(z / 8)}`);
+      const mesh = chunk.meshes.find(mesh => mesh.material.emissive.getHex() === 0x8b3c05);
+      const values = mesh.geometry.attributes.position.array;
+      const points = [];
+      for (let j = 0; j < values.length; j += 3) points.push([values[j], values[j + 1], values[j + 2]]);
+      const along = point => dx * (point[0] - x) + dz * (point[2] - z);
+      const wall = dx > 0 || dz > 0 ? 0 : -1;
+      assert(Math.abs(Math.min(...points.map(along)) - wall) < 0.0001,
+        `torch ${i} touches its supporting face`);
+      const low = points.filter(point => point[1] < y + 0.4);
+      const high = points.filter(point => point[1] > y + 0.8);
+      assert(Math.min(...high.map(along)) > Math.min(...low.map(along)),
+        `torch ${i} leans away from its supporting block`);
+      const light = chunk.torches[0];
+      assert(along(light) > Math.min(...low.map(along)), `torch ${i} light follows its tip`);
+    }
+    assert(torchColorForFace([0, 0, 0], [0, 1, 0]) === ITEM_DEFINITIONS.torch.color,
+      "floor torches remain upright");
+
+    const x = 100, z = 100, y = 105;
+    for (let by = 98; by <= y; by++) blockEdits.set(blockKey(x, by, z), null);
+    blockEdits.set(blockKey(x, 98, z), { x, y: 98, z, type: "stone", color: ITEM_DEFINITIONS.stone.color });
+    blockEdits.set(blockKey(x, 100, z), { x, y: 100, z, type: "log", color: ITEM_DEFINITIONS.log.color });
+    blockEdits.set(blockKey(x, y, z), { x, y, z, type: "leaves", color: ITEM_DEFINITIONS.leaves.color });
+    assert(leafHasWood(x, y, z), "remaining lower trunk supports leaves");
+    updateLeafDecay(10000);
+    updateLeafDecay(20000);
+    assert(blockType(getBlock(x, y, z)) === "leaves", "supported leaves do not decay");
+    blockEdits.set(blockKey(x, 100, z), null);
+    assert(!leafHasWood(x, y, z), "leaf detects complete removal of trunk");
+    const random = Math.random;
+    Math.random = () => 0;
+    updateLeafDecay(22000);
+    updateLeafDecay(26000);
+    Math.random = random;
+    assert(getBlock(x, y, z) === null, "unsupported leaves decay after a delay");
+    const sapling = drops.find(drop => drop.type === "sapling");
+    assert(sapling && sapling.position[1] === 99.325, "sapling lands on the ground");
+    rendererState.render();
+    assert(rendererState.dropMeshes.has(sapling), "sapling has visible emoji sprite");
+    inventory.fill(null);
+    camera.pos = [x + 0.5, 99, z + 0.5];
+    updateDrops();
+    assert(countInventoryItem("sapling") === 1 && !drops.includes(sapling), "sapling is picked up");
+
+    drops.push({ type: "apple", position: [x + 0.5, 99.15, z + 0.5], networked: false });
+    rendererState.render();
+    assert(rendererState.dropMeshes.has(drops[drops.length - 1]), "apple has visible emoji sprite");
+    updateDrops();
+    assert(countInventoryItem("apple") === 1, "apple is picked up");
+    selectedSlot = inventory.findIndex(item => item?.type === "apple");
+    playerHealth = 10;
+    assert(useHeldFood() && playerHealth === 14 && countInventoryItem("apple") === 0,
+      "apple restores health and is consumed");
+
+    drops.push({ type: "apple", position: [x + 0.5, 99.15, z + 0.5], networked: false });
+    inventory.fill(null);
+    for (let i = 0; i < inventory.length; i++) {
+      inventory[i] = { type: "stone", color: ITEM_DEFINITIONS.stone.color, count: 64 };
+    }
+    updateDrops();
+    assert(drops.some(drop => drop.type === "apple"), "full inventory leaves the item on the ground");
+    inventory.fill(null);
+    drops.length = 0;
+
+    const sent = [];
+    worldSocket = { readyState: WebSocket.OPEN, send: data => sent.push(JSON.parse(data)) };
+    hasLoadedServerState = true;
+    for (let by = 98; by <= y; by++) blockEdits.set(blockKey(x + 1, by, z), null);
+    blockEdits.set(blockKey(x + 1, 98, z), {
+      x: x + 1, y: 98, z, type: "stone", color: ITEM_DEFINITIONS.stone.color
+    });
+    blockEdits.set(blockKey(x + 1, y, z), {
+      x: x + 1, y, z, type: "leaves", color: ITEM_DEFINITIONS.leaves.color
+    });
+    Math.random = () => 0.15;
+    updateLeafDecay(28000);
+    updateLeafDecay(34000);
+    Math.random = random;
+    const request = sent.find(message => message.type === "leaf_decay" && message.x === x + 1);
+    assert(request?.item_type === "apple" && blockType(getBlock(x + 1, y, z)) === "leaves",
+      "network decay requests an apple and waits for server confirmation");
+    handleDropMessage({ type: "leaf_decayed", edit: { x: x + 1, y, z, color: null },
+      drop: { drop_id: "decayed", item_type: "apple", position: request.position } });
+    assert(getBlock(x + 1, y, z) === null && drops.some(drop => drop.id === "decayed"),
+      "server decay updates the leaf and adds the shared drop");
+    drops.length = 0;
+    sent.length = 0;
+    addNetworkDrop({ drop_id: "test", item_type: "apple", position: [x + 0.5, 99.15, z + 0.5] });
+    updateDrops();
+    assert(sent.some(message => message.type === "drop_pickup"), "shared drop requests pickup");
+    const saved = inventoryPayload();
+    saved[selectedSlot] = { type: "apple", color: ITEM_DEFINITIONS.apple.color, count: 1 };
+    handleDropMessage({ type: "drop_picked_up", drop_id: "test", inventory: saved });
+    handleDropMessage({ type: "drop_picked_up", drop_id: "test", inventory: saved });
+    assert(countInventoryItem("apple") === 1, "shared drop is awarded once");
+    hasLoadedServerState = false;
+    worldSocket = socket;
+    return failures;
+  }
+  document.getElementById("game").addEventListener("load", event => {
+    const result = document.getElementById("result");
+    try {
+      const failures = event.target.contentWindow.eval(`(${runTests.toString()})()`);
+      result.textContent = failures.length ? `FAIL\n${failures.join("\n")}` : "PASS";
+    } catch (error) {
+      result.textContent = `FAIL\n${error.stack}`;
+    }
+  });
+</script>

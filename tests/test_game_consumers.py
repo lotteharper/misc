@@ -24,7 +24,7 @@ def load_consumers():
     )
     modules["django.db"].transaction = types.SimpleNamespace(atomic=contextlib.nullcontext)
     modules["django.utils"].timezone = types.SimpleNamespace(now=lambda: None)
-    for name in ("WorldArrow", "WorldBlockEdit", "WorldContainer", "WorldPlayer"):
+    for name in ("WorldArrow", "WorldBlockEdit", "WorldContainer", "WorldDrop", "WorldPlayer"):
         setattr(modules["world.models"], name, type(name, (), {}))
     spec = importlib.util.spec_from_file_location("world.game_consumers", "game_consumers.py")
     module = importlib.util.module_from_spec(spec)
@@ -54,6 +54,7 @@ class WorldConsumerTests(unittest.IsolatedAsyncioTestCase):
         inventory[0] = {"type": "bow", "color": "#9b6738", "count": 1}
         inventory[1] = {"type": "arrows", "color": "#d5d5d5", "count": 4}
         inventory[2] = {"type": "diamond_sword", "color": "#6cf0f2", "count": 1}
+        inventory[3] = {"type": "apple", "color": "#d83930", "count": 3}
         self.assertEqual(consumers.clean_inventory(inventory), inventory)
 
     async def test_combat_is_targeted_and_validated(self):
@@ -112,6 +113,33 @@ class WorldConsumerTests(unittest.IsolatedAsyncioTestCase):
             "type": "arrow_pickup_failed", "arrow_id": ARROW_ID,
         })
         self.consumer.channel_layer.group_send.assert_not_awaited()
+
+    async def test_leaf_decay_and_drop_pickup(self):
+        drop = {"drop_id": ARROW_ID, "item_type": "apple", "position": [1.5, 2.15, 3.5]}
+        self.consumer.decay_leaf = AsyncMock(return_value=drop)
+        self.consumer.pick_up_drop = AsyncMock(return_value=[None] * 27)
+        await self.consumer.receive(json.dumps({
+            "type": "leaf_decay", "x": 1, "y": 5, "z": 3,
+            "item_type": "apple", "position": drop["position"],
+        }))
+        self.assertEqual(self.consumer.channel_layer.group_send.await_args.args[1]["message"],
+                         {"type": "leaf_decayed", "edit": {
+                             "x": 1, "y": 5, "z": 3, "color": None}, "drop": drop})
+        await self.consumer.receive(json.dumps({"type": "drop_pickup", "drop_id": ARROW_ID}))
+        self.consumer.send_json.assert_awaited_once_with({
+            "type": "drop_picked_up", "drop_id": ARROW_ID, "inventory": [None] * 27,
+        })
+        self.assertEqual(self.consumer.channel_layer.group_send.await_args.args[1]["message"],
+                         {"type": "drop_remove", "drop_id": ARROW_ID})
+
+    async def test_invalid_leaf_decay_is_rejected(self):
+        self.consumer.decay_leaf = AsyncMock()
+        for item, position in [("stone", [1.5, 2, 3.5]), ("apple", [20, 2, 3.5]),
+                               ("apple", [1.5, 20, 3.5])]:
+            await self.consumer.receive_leaf_decay({
+                "x": 1, "y": 5, "z": 3, "item_type": item, "position": position,
+            })
+        self.consumer.decay_leaf.assert_not_awaited()
 
 
 if __name__ == "__main__":

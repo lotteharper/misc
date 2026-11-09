@@ -45,6 +45,8 @@ class ArrowDatabaseTests(unittest.TestCase):
             editor.create_model(cls.user_class)
             editor.create_model(cls.models.WorldPlayer)
             editor.create_model(cls.models.WorldArrow)
+            editor.create_model(cls.models.WorldBlockEdit)
+            editor.create_model(cls.models.WorldDrop)
 
     @classmethod
     def tearDownClass(cls):
@@ -56,6 +58,8 @@ class ArrowDatabaseTests(unittest.TestCase):
 
     def setUp(self):
         self.models.WorldArrow.objects.all().delete()
+        self.models.WorldBlockEdit.objects.all().delete()
+        self.models.WorldDrop.objects.all().delete()
         self.models.WorldPlayer.objects.all().delete()
         user = self.user_class.objects.create(username=str(uuid.uuid4()))
         self.player = self.models.WorldPlayer.objects.create(user=user, room="lobby")
@@ -92,6 +96,34 @@ class ArrowDatabaseTests(unittest.TestCase):
         self.player.save()
         self.assertIsNone(async_to_sync(self.consumer.pick_up_arrow)(self.arrow_id))
         self.assertTrue(self.models.WorldArrow.objects.filter(arrow_id=self.arrow_id).exists())
+
+    def test_leaf_decay_claim_and_persistent_pickup(self):
+        from asgiref.sync import async_to_sync
+        decay = async_to_sync(self.consumer.decay_leaf)
+        pickup = async_to_sync(self.consumer.pick_up_drop)
+        drop = decay(1, 5, 3, "apple", [1, 2.85, 3])
+        self.assertEqual(drop["item_type"], "apple")
+        self.assertIsNone(decay(1, 5, 3, "sapling", [1, 2.85, 3]))
+        self.assertEqual(async_to_sync(self.consumer.load_drops)(), [drop])
+        self.consumer.last_position = {"x": 50, "y": 2, "z": 3}
+        self.assertIsNone(pickup(drop["drop_id"]))
+        self.consumer.last_position = {"x": 1, "y": 2, "z": 3}
+        self.player.inventory = [{"type": "stone", "color": "#777b82", "count": 64}] * 27
+        self.player.save()
+        self.assertIsNone(pickup(drop["drop_id"]))
+        self.player.inventory = [None] * 27
+        self.player.save()
+        result = pickup(drop["drop_id"])
+        self.assertEqual(result[0], {"type": "apple", "color": "#d83930", "count": 1})
+        self.assertIsNone(pickup(drop["drop_id"]))
+        self.player.refresh_from_db()
+        self.assertEqual(self.player.inventory, result)
+
+    def test_decay_does_not_remove_other_blocks(self):
+        from asgiref.sync import async_to_sync
+        self.models.WorldBlockEdit.objects.create(room="lobby", x=1, y=5, z=3,
+                                                   color="#777b82")
+        self.assertIsNone(async_to_sync(self.consumer.decay_leaf)(1, 5, 3, None, [1, 2, 3]))
 
 
 if __name__ == "__main__":
