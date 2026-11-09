@@ -30,10 +30,10 @@
         `torch ${i} touches its supporting face`);
       const low = points.filter(point => point[1] < y + 0.4);
       const high = points.filter(point => point[1] > y + 0.8);
-      assert(Math.min(...high.map(along)) > Math.min(...low.map(along)),
-        `torch ${i} leans away from its supporting block`);
+      assert(Math.min(...high.map(along)) < Math.min(...low.map(along)),
+        `torch ${i} leans toward its supporting block`);
       const light = chunk.torches[0];
-      assert(along(light) > Math.min(...low.map(along)), `torch ${i} light follows its tip`);
+      assert(along(light) < Math.min(...low.map(along)), `torch ${i} light follows its tip`);
     }
     assert(torchColorForFace([0, 0, 0], [0, 1, 0]) === ITEM_DEFINITIONS.torch.color,
       "floor torches remain upright");
@@ -56,17 +56,49 @@
     Math.random = random;
     assert(getBlock(x, y, z) === null, "unsupported leaves decay after a delay");
     const sapling = drops.find(drop => drop.type === "sapling");
-    assert(sapling && sapling.position[1] === 99.325, "sapling lands on the ground");
+    assert(sapling && sapling.position[1] === 99.325 && sapling.fallY === y + 0.5,
+      "sapling starts falling toward the ground");
     rendererState.render();
     assert(rendererState.dropMeshes.has(sapling), "sapling has visible emoji sprite");
+    camera.pos = [x + 0.5, 104, z - 3];
+    camera.rot = [0, 0];
+    rendererState.render();
+    const sprite = rendererState.dropMeshes.get(sapling);
+    const gl = rendererState.renderer.getContext();
+    const pixels = () => {
+      rendererState.renderer.render(rendererState.scene, rendererState.view);
+      const data = new Uint8Array(gl.drawingBufferWidth * gl.drawingBufferHeight * 4);
+      gl.readPixels(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight, gl.RGBA, gl.UNSIGNED_BYTE, data);
+      return data;
+    };
+    const visiblePixels = pixels();
+    sprite.visible = false;
+    const hiddenPixels = pixels();
+    sprite.visible = true;
+    assert(visiblePixels.some((value, i) => value !== hiddenPixels[i]),
+      "sapling emoji changes the rendered pixels");
     inventory.fill(null);
     camera.pos = [x + 0.5, 99, z + 0.5];
+    updateDrops(0.1);
+    assert(sapling.fallY < y + 0.5 && sapling.fallY > sapling.groundY &&
+      drops.includes(sapling), "falling saplings cannot be picked up prematurely");
+    updateDrops(10);
     updateDrops();
     assert(countInventoryItem("sapling") === 1 && !drops.includes(sapling), "sapling is picked up");
 
     drops.push({ type: "apple", position: [x + 0.5, 99.15, z + 0.5], networked: false });
     rendererState.render();
     assert(rendererState.dropMeshes.has(drops[drops.length - 1]), "apple has visible emoji sprite");
+    const appleSprite = rendererState.dropMeshes.get(drops[drops.length - 1]);
+    camera.pos = [x + 0.5, 97.6, z - 3];
+    rendererState.render();
+    const applePixels = pixels();
+    appleSprite.visible = false;
+    const noApplePixels = pixels();
+    appleSprite.visible = true;
+    assert(applePixels.some((value, i) => value !== noApplePixels[i]),
+      "apple emoji changes the rendered pixels");
+    camera.pos = [x + 0.5, 99, z + 0.5];
     updateDrops();
     assert(countInventoryItem("apple") === 1, "apple is picked up");
     selectedSlot = inventory.findIndex(item => item?.type === "apple");
@@ -94,7 +126,7 @@
     blockEdits.set(blockKey(x + 1, y, z), {
       x: x + 1, y, z, type: "leaves", color: ITEM_DEFINITIONS.leaves.color
     });
-    Math.random = () => 0.15;
+    Math.random = () => 0;
     updateLeafDecay(28000);
     updateLeafDecay(34000);
     Math.random = random;
@@ -105,6 +137,8 @@
       drop: { drop_id: "decayed", item_type: "apple", position: request.position } });
     assert(getBlock(x + 1, y, z) === null && drops.some(drop => drop.id === "decayed"),
       "server decay updates the leaf and adds the shared drop");
+    assert(drops.find(drop => drop.id === "decayed").fallY === y + 0.5,
+      "shared drops fall from the decaying leaf");
     drops.length = 0;
     sent.length = 0;
     addNetworkDrop({ drop_id: "test", item_type: "apple", position: [x + 0.5, 99.15, z + 0.5] });
@@ -117,6 +151,32 @@
     assert(countInventoryItem("apple") === 1, "shared drop is awarded once");
     hasLoadedServerState = false;
     worldSocket = socket;
+    drops.length = 0;
+    camera.pos = [200.5, 100, 200.5];
+    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+      for (let dy = 0; dy < 3; dy++) {
+        const bx = 200 + dx, by = 105 + dy, bz = 200 + dz;
+        blockEdits.set(blockKey(bx, by, bz), {
+          x: bx, y: by, z: bz, type: "leaves", color: ITEM_DEFINITIONS.leaves.color
+        });
+      }
+    }
+    Math.random = () => 0;
+    updateLeafDecay(40000);
+    updateLeafDecay(46000);
+    Math.random = random;
+    assert(drops.filter(drop => drop.type === "sapling").length >= 3 &&
+      drops.some(drop => drop.type === "apple"),
+      "a decaying tree canopy actually produces multiple saplings and apples");
+    for (let ax = -4; ax <= 4; ax++) for (let az = -4; az <= 4; az++) {
+      const yields = { sapling: 0, apple: 0 };
+      for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+        const type = leafDropType(ax + dx, az + dz);
+        if (type) yields[type] += 3;
+      }
+      assert(yields.sapling >= 3 && yields.apple >= 1,
+        `complete canopy at ${ax},${az} yields multiple saplings and apples`);
+    }
     return failures;
   }
   document.getElementById("game").addEventListener("load", event => {

@@ -142,12 +142,13 @@ function createVoxelRenderer() {
       if (direction) {
         const [dx, dz] = direction;
         const sine = Math.sin(Math.PI / 6), cosine = Math.cos(Math.PI / 6);
-        const baseX = x + 0.5 - dx * (0.5 - 0.09 * cosine);
-        const baseZ = z + 0.5 - dz * (0.5 - 0.09 * cosine);
+        const offset = 0.72 * sine + 0.09 * cosine;
+        const baseX = x + 0.5 - dx * (0.5 - offset);
+        const baseZ = z + 0.5 - dz * (0.5 - offset);
         const transform = (u, v, w, point) => {
-          const along = u * cosine + v * sine;
+          const along = u * cosine - v * sine;
           return [dx * along - dz * w + (point ? baseX : 0),
-            -u * sine + v * cosine + (point ? y + 0.28 : 0),
+            u * sine + v * cosine + (point ? y + 0.28 : 0),
             dz * along + dx * w + (point ? baseZ : 0)];
         };
         const faces = [
@@ -289,7 +290,7 @@ function createVoxelRenderer() {
     const active = new Set(arrows);
     for (const [arrow, mesh] of arrowMeshes) {
       if (!active.has(arrow)) {
-        world.remove(mesh);
+        scene.remove(mesh);
         arrowMeshes.delete(arrow);
       }
     }
@@ -304,13 +305,13 @@ function createVoxelRenderer() {
         const fletching = new THREE.Mesh(arrowFletchingGeometry, arrowFletchingMaterial);
         fletching.position.z = -0.29;
         group.add(shaft, tip, fletching);
-        world.add(group);
+        scene.add(group);
         arrowMeshes.set(arrow, group);
       }
-      group.position.set(...arrow.position);
+      group.position.set(-arrow.position[0], arrow.position[1], arrow.position[2]);
       group.quaternion.setFromUnitVectors(
         new THREE.Vector3(0, 0, 1),
-        new THREE.Vector3(...arrow.direction).normalize()
+        new THREE.Vector3(-arrow.direction[0], arrow.direction[1], arrow.direction[2]).normalize()
       );
     }
   }
@@ -319,7 +320,7 @@ function createVoxelRenderer() {
     const active = new Set(drops);
     for (const [drop, mesh] of dropMeshes) {
       if (!active.has(drop)) {
-        world.remove(mesh);
+        scene.remove(mesh);
         mesh.material.dispose();
         dropMeshes.delete(drop);
       }
@@ -342,10 +343,10 @@ function createVoxelRenderer() {
         }
         sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true }));
         sprite.scale.set(0.65, 0.65, 1);
-        world.add(sprite);
+        scene.add(sprite);
         dropMeshes.set(drop, sprite);
       }
-      sprite.position.set(...drop.position);
+      sprite.position.set(-drop.position[0], drop.fallY ?? drop.position[1], drop.position[2]);
     }
   }
 
