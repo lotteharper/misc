@@ -100,6 +100,26 @@
     rendererState.render();
     assert(rendererState.arrowMeshes.size === 0, "picked-up arrow geometry is removed");
 
+    camera.pos = [0, 100, 0];
+    const nearbyArrow = { position: [5, 100.85, 0], direction: [0, 0, 1],
+      velocity: [0, 0, 0], stuck: true, networked: false, age: 1 };
+    arrows.push(nearbyArrow);
+    updateArrows(0.1);
+    assert(nearbyArrow.pickupPosition && nearbyArrow.pickupPosition[0] < 5,
+      "landed arrow at five blocks moves toward the player");
+    rendererState.render();
+    assert(Math.abs(rendererState.arrowMeshes.get(nearbyArrow).position.x +
+      nearbyArrow.pickupPosition[0]) < 0.0001, "arrow attraction is rendered");
+    updateArrows(1);
+    assert(!arrows.includes(nearbyArrow), "landed arrow is collected automatically");
+    const distantArrow = { position: [5.01, 100.85, 0], direction: [0, 0, 1],
+      velocity: [0, 0, 0], stuck: true, networked: false, age: 1 };
+    arrows.push(distantArrow);
+    updateArrows(1);
+    assert(!distantArrow.pickupPosition && arrows.includes(distantArrow),
+      "landed arrow outside five blocks does not move");
+    arrows.length = 0;
+
     camera.pos = [0.5, 100, 0.5];
     const sent = [];
     const socket = worldSocket;
@@ -167,6 +187,20 @@
     updateArrows(0.05);
     assert(pendingArrowCredits === 0 && countInventoryItem("arrows") === 1,
       "retained pickup is added when space becomes available");
+    const rangedId = "fe180516-5be1-4f4c-9df5-6d2860785402";
+    handleArrowMessage({ type: "arrow_land", arrow_id: rangedId,
+      position: [camera.pos[0] + 5, camera.pos[1] + PLAYER_HEIGHT / 2, camera.pos[2]],
+      direction: [0, 0, 1] });
+    sent.length = 0;
+    updateArrows(0.1);
+    assert(arrows[0].pickupPosition && !sent.some(message => message.type === "arrow_pickup"),
+      "shared arrow moves before requesting pickup");
+    updateArrows(1);
+    assert(sent.some(message => message.type === "arrow_pickup" && message.arrow_id === rangedId),
+      "shared arrow requests pickup after attraction");
+    handleArrowMessage({ type: "arrow_pickup_failed", arrow_id: rangedId });
+    assert(!arrows[0].pickupPosition, "failed shared arrow pickup resets its visual position");
+    arrows.length = 0;
     hasLoadedServerState = false;
     worldSocket = socket;
     return failures;

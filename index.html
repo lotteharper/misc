@@ -1792,6 +1792,26 @@
         fallY: Math.max(position[1], sourceY), networked: id !== null };
     }
 
+    const ITEM_ATTRACTION_RANGE = 5;
+    const ITEM_PICKUP_RANGE = 1.25;
+    const ITEM_ATTRACTION_SPEED = 6;
+
+    function attractItem(item, position, dt) {
+      const target = [camera.pos[0], camera.pos[1] + PLAYER_HEIGHT / 2, camera.pos[2]];
+      const distanceFrom = point => Math.hypot(...point.map((value, i) => value - target[i]));
+      if ((item.networked && distanceFrom(item.position) > ITEM_ATTRACTION_RANGE) ||
+          distanceFrom(item.pickupPosition || position) > ITEM_ATTRACTION_RANGE) {
+        item.pickupPosition = null;
+        return false;
+      }
+      const current = item.pickupPosition || position;
+      const distance = distanceFrom(current);
+      const step = Math.min(distance, ITEM_ATTRACTION_SPEED * dt);
+      item.pickupPosition = current.map((value, i) =>
+        value + (target[i] - value) * step / (distance || 1));
+      return distanceFrom(item.pickupPosition) <= ITEM_PICKUP_RANGE;
+    }
+
     let lastLeafScanAt = -Infinity;
     function updateLeafDecay(now) {
       if (now - lastLeafScanAt < 2000) return;
@@ -1891,6 +1911,7 @@
         pendingDropPickup = null;
         if (drop) {
           drop.pickupPending = false;
+          drop.pickupPosition = null;
           drop.nextPickupAt = performance.now() + 1000;
         }
         if (inventoryDirty) syncInventory();
@@ -1921,18 +1942,23 @@
       }
       for (let i = drops.length - 1; i >= 0; i--) {
         const drop = drops[i];
-        if (drop.fallY > drop.groundY) {
+        if (!drop.pickupPosition && drop.fallY > drop.groundY) {
           drop.fallY = Math.max(drop.groundY, drop.fallY - 5 * dt);
-          if (drop.fallY > drop.groundY) continue;
         }
-        if (Math.hypot(drop.position[0] - camera.pos[0],
-            drop.position[1] - (camera.pos[1] + PLAYER_HEIGHT / 2),
-            drop.position[2] - camera.pos[2]) >= 1.25) continue;
+        if (drop.pickupPending) continue;
+        const hasSpace = inventory.some(item => !item ||
+          ((item.type || itemTypeFromColor(item.color)) === drop.type && item.count < 64));
+        if (!hasSpace || (drop.networked &&
+            (!hasLoadedServerState || worldSocket?.readyState !== WebSocket.OPEN))) {
+          drop.pickupPosition = null;
+          continue;
+        }
+        const visiblePosition = [drop.position[0], drop.fallY ?? drop.position[1], drop.position[2]];
+        if (!attractItem(drop, visiblePosition, dt)) continue;
         if (!drop.networked) {
           if (addToInventory(ITEM_DEFINITIONS[drop.type].color, drop.type)) drops.splice(i, 1);
         } else if (!drop.pickupPending && !pendingDropPickup && !pendingArrowPickup &&
             pendingArrowCredits === 0 && !Object.values(pendingDropCredits).some(Boolean) &&
-            inventory.some(item => !item || (item.type === drop.type && item.count < 64)) &&
             performance.now() >= (drop.nextPickupAt || 0) &&
             hasLoadedServerState && worldSocket?.readyState === WebSocket.OPEN) {
           drop.pickupPending = true;
@@ -3434,6 +3460,7 @@
         pendingArrowPickup = null;
         if (arrow) {
           arrow.pickupPending = false;
+          arrow.pickupPosition = null;
           arrow.nextPickupAt = performance.now() + 1000;
         }
         if (inventoryDirty) syncInventory();
@@ -3511,13 +3538,16 @@
             arrow.position = next;
           }
         }
-        if (arrow.stuck && arrow.age >= 0.5 &&
-            Math.hypot(arrow.position[0] - camera.pos[0],
-              arrow.position[1] - (camera.pos[1] + PLAYER_HEIGHT / 2),
-              arrow.position[2] - camera.pos[2]) < 1.25) {
+        if (arrow.stuck && arrow.age >= 0.5 && !arrow.pickupPending) {
+          const hasSpace = inventory.some(item => !item ||
+            ((item.type || itemTypeFromColor(item.color)) === "arrows" && item.count < 64));
+          if (!hasSpace || (arrow.networked && (!arrow.confirmed || !hasLoadedServerState ||
+              worldSocket?.readyState !== WebSocket.OPEN))) {
+            arrow.pickupPosition = null;
+            continue;
+          }
+          if (!attractItem(arrow, arrow.position, dt)) continue;
           if (arrow.networked) {
-            const hasSpace = inventory.some(item => !item ||
-              ((item.type || itemTypeFromColor(item.color)) === "arrows" && item.count < 64));
             if (arrow.confirmed && !arrow.pickupPending && !pendingArrowPickup && !pendingDropPickup &&
                 !Object.values(pendingDropCredits).some(Boolean) &&
                 pendingArrowCredits === 0 && hasSpace &&

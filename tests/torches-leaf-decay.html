@@ -116,6 +116,34 @@
     inventory.fill(null);
     drops.length = 0;
 
+    camera.pos = [0, 100, 0];
+    for (const type of ["sapling", "apple"]) {
+      const item = makeDrop(type, [5, 100.85, 0], 100.85);
+      drops.push(item);
+      updateDrops(0.1);
+      assert(item.pickupPosition && item.pickupPosition[0] < 5 && drops.includes(item),
+        `${type} at exactly five blocks moves toward the player`);
+      rendererState.render();
+      assert(Math.abs(rendererState.dropMeshes.get(item).position.x + item.pickupPosition[0]) < 0.0001,
+        `${type} attraction is rendered`);
+      updateDrops(1);
+      assert(!drops.includes(item) && countInventoryItem(type) === 1,
+        `${type} is automatically collected`);
+    }
+    const distant = makeDrop("apple", [5.01, 100.85, 0], 100.85);
+    drops.push(distant);
+    updateDrops(1);
+    assert(!distant.pickupPosition && drops.includes(distant), "drops beyond five blocks do not move");
+    camera.pos[0] = 0.02;
+    updateDrops(0.1);
+    assert(distant.pickupPosition, "drops begin moving when the player enters range");
+    camera.pos[0] = -10;
+    updateDrops(0.1);
+    assert(!distant.pickupPosition, "attraction stops when the player leaves range");
+    drops.length = 0;
+    inventory.fill(null);
+    camera.pos = [x + 0.5, 99, z + 0.5];
+
     const sent = [];
     worldSocket = { readyState: WebSocket.OPEN, send: data => sent.push(JSON.parse(data)) };
     hasLoadedServerState = true;
@@ -149,6 +177,17 @@
     handleDropMessage({ type: "drop_picked_up", drop_id: "test", inventory: saved });
     handleDropMessage({ type: "drop_picked_up", drop_id: "test", inventory: saved });
     assert(countInventoryItem("apple") === 1, "shared drop is awarded once");
+    sent.length = 0;
+    addNetworkDrop({ drop_id: "range", item_type: "sapling",
+      position: [camera.pos[0] + 5, camera.pos[1] + PLAYER_HEIGHT / 2, camera.pos[2]] });
+    updateDrops(0.1);
+    assert(drops[0].pickupPosition && !sent.some(message => message.type === "drop_pickup"),
+      "shared drop moves before requesting pickup");
+    updateDrops(1);
+    assert(sent.some(message => message.type === "drop_pickup" && message.drop_id === "range"),
+      "shared drop requests pickup after attraction");
+    handleDropMessage({ type: "drop_pickup_failed", drop_id: "range" });
+    assert(!drops[0].pickupPosition, "failed shared pickup resets its visual position");
     hasLoadedServerState = false;
     worldSocket = socket;
     drops.length = 0;

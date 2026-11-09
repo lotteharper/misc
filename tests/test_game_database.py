@@ -125,6 +125,24 @@ class ArrowDatabaseTests(unittest.TestCase):
                                                    color="#777b82")
         self.assertIsNone(async_to_sync(self.consumer.decay_leaf)(1, 5, 3, None, [1, 2, 3]))
 
+    def test_pickups_respect_five_block_range(self):
+        from asgiref.sync import async_to_sync
+        arrow = self.models.WorldArrow.objects.create(
+            arrow_id=self.arrow_id, room="lobby", owner_id=self.player.player_id,
+            position=[6, 2.85, 3], direction=[0, 0, 1], landed=True,
+        )
+        drop = self.models.WorldDrop.objects.create(
+            room="lobby", item_type="sapling", position=[6, 2.85, 3],
+        )
+        pickup_arrow = async_to_sync(self.consumer.pick_up_arrow)
+        pickup_drop = async_to_sync(self.consumer.pick_up_drop)
+        self.consumer.last_position["x"] = 0.99
+        self.assertIsNone(pickup_arrow(str(arrow.arrow_id)))
+        self.assertIsNone(pickup_drop(str(drop.drop_id)))
+        self.consumer.last_position["x"] = 1
+        self.assertIsNotNone(pickup_arrow(str(arrow.arrow_id)))
+        self.assertIsNotNone(pickup_drop(str(drop.drop_id)))
+
 
 if __name__ == "__main__":
     unittest.main()
