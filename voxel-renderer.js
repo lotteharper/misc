@@ -154,13 +154,13 @@ function createVoxelRenderer() {
       if (direction) {
         const [dx, dz] = direction;
         const sine = Math.sin(Math.PI / 6), cosine = Math.cos(Math.PI / 6);
-        const offset = 0.72 * sine + 0.09 * cosine;
+        const offset = 0.09 * cosine;
         const baseX = x + 0.5 - dx * (0.5 - offset);
         const baseZ = z + 0.5 - dz * (0.5 - offset);
         const transform = (u, v, w, point) => {
-          const along = u * cosine - v * sine;
+          const along = u * cosine + v * sine;
           return [dx * along - dz * w + (point ? baseX : 0),
-            u * sine + v * cosine + (point ? y + 0.28 : 0),
+            -u * sine + v * cosine + (point ? y + 0.28 : 0),
             dz * along + dx * w + (point ? baseZ : 0)];
         };
         const faces = [
