@@ -838,8 +838,9 @@
     }
 
     function itemIcon(type) {
-      if (type === "sapling") return "🌳";
+      if (type === "sapling") return "🌱";
       if (type === "apple") return "🍎";
+      if (type === "arrows") return "➶";
       if (!isToolType(type)) return type === "bow" ? "🏹" : "";
       if (/_axe$/.test(type)) return "🪓";
       if (/_shovel$/.test(type)) return "🛠";
@@ -1636,6 +1637,16 @@
       return [x + 0.5, WORLD_MIN_Y + 1.325, z + 0.5];
     }
 
+    function leafDropType(x, z) {
+      const lane = ((x + z) % 4 + 4) % 4;
+      return lane === 0 ? "sapling" : lane === 1 ? "apple" : null;
+    }
+
+    function makeDrop(type, position, sourceY, id = null) {
+      return { id, type, position: position.slice(), groundY: position[1],
+        fallY: Math.max(position[1], sourceY), networked: id !== null };
+    }
+
     let lastLeafScanAt = -Infinity;
     function updateLeafDecay(now) {
       if (now - lastLeafScanAt < 2000) return;
@@ -1680,8 +1691,7 @@
           continue;
         }
         if (now < leafDecayTimers.get(key) || pendingLeafDecay.has(key)) continue;
-        const roll = Math.random();
-        const type = roll < 0.12 ? "sapling" : roll < 0.18 ? "apple" : null;
+        const type = leafDropType(x, z);
         const position = dropGroundPosition(x, y, z);
         leafDecayTimers.delete(key);
         if (hasLoadedServerState && worldSocket?.readyState === WebSocket.OPEN) {
@@ -1689,18 +1699,18 @@
           worldSocket.send(JSON.stringify({ type: "leaf_decay", x, y, z, item_type: type, position }));
         } else {
           removeBlock(x, y, z);
-          if (type) drops.push({ type, position, networked: false });
+          if (type) drops.push(makeDrop(type, position, y + 0.5));
         }
       }
     }
 
-    function addNetworkDrop(drop) {
+    function addNetworkDrop(drop, sourceY = drop?.position?.[1]) {
       if (!drop || typeof drop.drop_id !== "string" ||
           !["sapling", "apple"].includes(drop.item_type) ||
           !Array.isArray(drop.position) || drop.position.length !== 3 ||
           !drop.position.every(Number.isFinite) ||
           drops.some(item => item.networked && item.id === drop.drop_id)) return;
-      drops.push({ id: drop.drop_id, type: drop.item_type, position: drop.position, networked: true });
+      drops.push(makeDrop(drop.item_type, drop.position, sourceY, drop.drop_id));
     }
 
     function handleDropMessage(message) {
@@ -1726,7 +1736,7 @@
         leafDecayTimers.delete(key);
         blockEdits.set(key, null);
         placedBlocks.delete(key);
-        addNetworkDrop(message.drop);
+        addNetworkDrop(message.drop, y + 0.5);
         return true;
       }
       if (!["drop_remove", "drop_picked_up", "drop_pickup_failed"].includes(message.type)) return false;
@@ -1756,7 +1766,7 @@
       return true;
     }
 
-    function updateDrops() {
+    function updateDrops(dt = 0) {
       for (const type of Object.keys(pendingDropCredits)) {
         if (pendingDropCredits[type] && !pendingArrowPickup && !pendingDropPickup &&
             inventory.some(item => !item || (item.type === type && item.count < 64))) {
@@ -1766,6 +1776,10 @@
       }
       for (let i = drops.length - 1; i >= 0; i--) {
         const drop = drops[i];
+        if (drop.fallY > drop.groundY) {
+          drop.fallY = Math.max(drop.groundY, drop.fallY - 5 * dt);
+          if (drop.fallY > drop.groundY) continue;
+        }
         if (Math.hypot(drop.position[0] - camera.pos[0],
             drop.position[1] - (camera.pos[1] + PLAYER_HEIGHT / 2),
             drop.position[2] - camera.pos[2]) >= 1.25) continue;
@@ -4354,7 +4368,7 @@
 
       updatePhysics(dt);
       updateArrows(dt);
-      updateDrops();
+      updateDrops(dt);
       if (now - lastDamageAt > 4000 && now - lastHealthRegenAt > 1000 &&
           playerHealth < MAX_HEALTH) {
         lastHealthRegenAt = now;

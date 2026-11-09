@@ -48,8 +48,44 @@
     assert(arrows.length === 1 && countInventoryItem("arrows") === 2, "firing creates an arrow and consumes ammunition");
     rendererState.render();
     assert(rendererState.arrowMeshes.has(arrows[0]), "fired arrow has visible geometry");
-    for (let i = 0; i < 20; i++) updateArrows(0.05);
+    const arrow = arrows[0];
+    const originalPosition = arrow.position, originalDirection = arrow.direction;
+    arrow.position = [0.5, 101.6, 3];
+    arrow.direction = [1, 0, 0];
+    rendererState.render();
+    const arrowMesh = rendererState.arrowMeshes.get(arrow);
+    const gl = rendererState.renderer.getContext();
+    const pixels = () => {
+      rendererState.renderer.render(rendererState.scene, rendererState.view);
+      const data = new Uint8Array(gl.drawingBufferWidth * gl.drawingBufferHeight * 4);
+      gl.readPixels(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight, gl.RGBA, gl.UNSIGNED_BYTE, data);
+      return data;
+    };
+    const visiblePixels = pixels();
+    arrowMesh.visible = false;
+    const hiddenPixels = pixels();
+    arrowMesh.visible = true;
+    assert(visiblePixels.some((value, i) => value !== hiddenPixels[i]),
+      "arrow geometry changes the rendered pixels");
+    arrow.position = originalPosition;
+    arrow.direction = originalDirection;
+    updateArrows(0.05);
+    rendererState.render();
+    const flyingPixels = pixels();
+    arrowMesh.visible = false;
+    const noFlyingPixels = pixels();
+    arrowMesh.visible = true;
+    assert(flyingPixels.some((value, i) => value !== noFlyingPixels[i]),
+      "a fired arrow is visible while flying");
+    for (let i = 0; i < 19; i++) updateArrows(0.05);
     assert(arrows.length === 1 && arrows[0].stuck, "missed arrow stops at a block");
+    rendererState.render();
+    const landedPixels = pixels();
+    arrowMesh.visible = false;
+    const noLandedPixels = pixels();
+    arrowMesh.visible = true;
+    assert(landedPixels.some((value, i) => value !== noLandedPixels[i]),
+      "a landed arrow remains visible against a block");
     camera.pos = [arrows[0].position[0], arrows[0].position[1] - PLAYER_HEIGHT / 2, arrows[0].position[2]];
     const savedInventory = inventory.map(item => item && { ...item });
     inventory.fill(null);
