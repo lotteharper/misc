@@ -103,10 +103,44 @@
     Date.now = () => 0;
     render();
     const night = rendererState.scene.children.find(light => light.isDirectionalLight).intensity;
+    const moonlight = rendererState.scene.getObjectByName("moonlight");
+    const sunDisc = rendererState.scene.getObjectByName("sunDisc");
+    const moonDisc = rendererState.scene.getObjectByName("moonDisc");
+    assert(moonDisc.visible && !sunDisc.visible, "moon is visible at midnight, not the sun");
+    assert(moonlight.intensity > 0 && moonlight.intensity < 0.5,
+      "moonlight adds subtle illumination at midnight");
+    assert(moonDisc.position.y > rendererState.view.position.y, "moon is above the horizon at midnight");
+    const moonDirection = moonDisc.position.clone().sub(rendererState.view.position).normalize();
+    const lightDirection = moonlight.position.clone().sub(moonlight.target.position).normalize();
+    assert(moonDirection.dot(lightDirection) > 0.999, "moonlight comes from the moon's direction");
+    const oldCameraX = camera.pos[0];
+    camera.pos[0] += 5;
+    render();
+    assert(moonDisc.position.clone().sub(rendererState.view.position).normalize().distanceTo(moonDirection) < 1e-10,
+      "moon stays fixed in the sky as the camera moves");
+    camera.pos[0] = oldCameraX;
     Date.now = () => 900000;
     render();
     const day = rendererState.scene.children.find(light => light.isDirectionalLight).intensity;
     assert(day > night, "sunlight changes with time of day");
+    assert(sunDisc.visible && !moonDisc.visible, "sun is visible at noon, not the moon");
+    assert(moonlight.intensity === 0, "moonlight is off during the day");
+    assert(sunDisc.position.y > rendererState.view.position.y, "sun is above the horizon at noon");
+    assert(sunDisc.material.isMeshBasicMaterial && moonDisc.material.isMeshBasicMaterial &&
+      sunDisc.material.depthTest && moonDisc.material.depthTest,
+      "celestial discs are unlit and can be occluded by terrain");
+    Date.now = () => 449000;
+    render();
+    assert(moonDisc.visible && !sunDisc.visible && moonlight.intensity > 0,
+      "moon and moonlight remain until sunrise");
+    Date.now = () => 451000;
+    render();
+    assert(sunDisc.visible && !moonDisc.visible && moonlight.intensity === 0,
+      "sun replaces the moon after sunrise");
+    Date.now = () => 1351000;
+    render();
+    assert(moonDisc.visible && !sunDisc.visible && moonlight.intensity > 0,
+      "moon and moonlight return after sunset");
     Date.now = originalNow;
 
     // Render intersecting triangles in both orders into a depth-buffered target.

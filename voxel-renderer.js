@@ -27,7 +27,19 @@ function createVoxelRenderer() {
   Object.assign(sun.shadow.camera, { left: -24, right: 24, top: 24, bottom: -24, near: 0.5, far: 100 });
   sun.shadow.bias = -0.001;
   sun.shadow.normalBias = 0.05;
-  scene.add(ambient, fill, sun, sun.target);
+  const moonlight = new THREE.DirectionalLight(0xb9d1ff, 0);
+  moonlight.name = "moonlight";
+  scene.add(ambient, fill, sun, sun.target, moonlight, moonlight.target);
+
+  const celestialGeometry = new THREE.CircleGeometry(5, 32);
+  const sunDisc = new THREE.Mesh(celestialGeometry,
+    new THREE.MeshBasicMaterial({ color: 0xffe27a, toneMapped: false, depthWrite: false }));
+  const moonDisc = new THREE.Mesh(celestialGeometry,
+    new THREE.MeshBasicMaterial({ color: 0xdce6f5, toneMapped: false, depthWrite: false }));
+  sunDisc.name = "sunDisc";
+  moonDisc.name = "moonDisc";
+  scene.add(sunDisc, moonDisc);
+  const skyDirection = new THREE.Vector3();
 
   const torchLights = Array.from({ length: 6 }, () => {
     const light = new THREE.PointLight(0xffa044, 0, 10, 2);
@@ -355,6 +367,7 @@ function createVoxelRenderer() {
     const phase = (Date.now() % cycle) / cycle;
     const angle = phase * Math.PI * 2 - Math.PI / 2;
     const daylight = Math.max(0, Math.sin(angle));
+    const moonAmount = Math.max(0, -Math.sin(angle));
     const twilight = Math.max(0, Math.min(1, (Math.sin(angle) + 0.15) / 0.3));
     ambient.intensity = 0.28 + daylight * 0.4;
     fill.intensity = 0.3 + daylight * 0.2;
@@ -364,6 +377,17 @@ function createVoxelRenderer() {
     sun.position.set(-camera.pos[0] - Math.cos(angle) * 40,
       camera.pos[1] + Math.max(0.05, Math.sin(angle)) * 40,
       camera.pos[2] + 20);
+    moonlight.intensity = moonAmount * 0.32;
+    moonlight.target.position.copy(sun.target.position);
+    moonlight.position.set(-camera.pos[0] + Math.cos(angle) * 40,
+      camera.pos[1] + moonAmount * 40, camera.pos[2] - 20);
+    skyDirection.set(-Math.cos(angle), Math.sin(angle), 0.5).normalize().multiplyScalar(100);
+    sunDisc.position.copy(view.position).add(skyDirection);
+    moonDisc.position.copy(view.position).sub(skyDirection);
+    sunDisc.visible = Math.sin(angle) >= 0;
+    moonDisc.visible = Math.sin(angle) < 0;
+    sunDisc.lookAt(view.position);
+    moonDisc.lookAt(view.position);
     const sky = new THREE.Color(0x101b34).lerp(new THREE.Color(0x9ec8eb), twilight * (0.35 + daylight * 0.65));
     scene.background = sky;
     const minutes = Math.floor(phase * 24 * 60);
