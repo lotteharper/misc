@@ -1,0 +1,113 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Voxel lighting tests</title>
+<pre id="result">Running...</pre>
+<iframe id="game" src="../index.html" width="320" height="240"></iframe>
+<script>
+  function runTests() {
+    const failures = [];
+    const assert = (condition, message) => { if (!condition) failures.push(message); };
+    const originalNow = Date.now;
+    const renderer = rendererState.renderer;
+    const scene = rendererState.scene;
+    const target = new THREE.WebGLRenderTarget(128, 128);
+    const pixels = new Uint8Array(128 * 128 * 4);
+    const brightness = view => {
+      renderer.setRenderTarget(target);
+      renderer.render(scene, view);
+      renderer.readRenderTargetPixels(target, 0, 0, 128, 128, pixels);
+      return pixels.reduce((sum, value, i) => sum + (i % 4 === 3 ? 0 : value), 0);
+    };
+    const flush = () => { for (let i = 0; i < 110; i++) rendererState.render(); };
+    try {
+      Date.now = () => 0;
+      camera.pos = [0.5, 100, 0.5];
+      camera.rot = [0, 0];
+      const positions = [[1, 101, 3], [3, 100, 0], [-3, 100, 0],
+        [0, 100, -3], [5, 100, 0], [-5, 100, 0], [0, 100, -5], [0, 100, 60]];
+      for (const [x, y, z] of positions) {
+        blockEdits.set(blockKey(x, y, z), { x, y, z, type: "torch", color: ITEM_DEFINITIONS.torch.color });
+      }
+      flush();
+      const pointLights = () => scene.children.filter(light => light.isPointLight);
+      const distant = pointLights().find(light => light.position.z === 60.5);
+      assert(pointLights().length >= positions.length && distant && distant.intensity > 0,
+        "torches beyond 18 blocks remain lit even with more than six nearby torches");
+
+      const hidden = scene.children.filter(child => !child.isLight);
+      for (const child of hidden) child.visible = false;
+      const background = scene.background;
+      scene.background = new THREE.Color(0);
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(2, 2),
+        new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide }));
+      plane.position.set(-0.5, 100.7, 62.5);
+      scene.add(plane);
+      const farView = new THREE.PerspectiveCamera(45, 1, 0.1, 10);
+      farView.position.set(-0.5, 100.7, 59);
+      farView.lookAt(plane.position);
+      const farLit = brightness(farView);
+      distant.intensity = 0;
+      const farUnlit = brightness(farView);
+      distant.intensity = 18;
+      assert(farLit > farUnlit * 1.1, "a distant torch visibly illuminates nearby geometry");
+      scene.remove(plane);
+      plane.geometry.dispose();
+      plane.material.dispose();
+      for (const child of hidden) child.visible = true;
+      scene.background = background;
+
+      const drop = makeDrop("apple", [0.5, 101.62, 4.5], 101.62);
+      drops.push(drop);
+      rendererState.render();
+      const mesh = rendererState.dropMeshes.get(drop);
+      assert(mesh.material.isMeshLambertMaterial && mesh.material.map,
+        "item drops use a lit, textured material");
+      const others = scene.children.filter(child => !child.isLight && child !== mesh);
+      for (const child of others) child.visible = false;
+      scene.background = new THREE.Color(0);
+      const lights = pointLights();
+      for (const light of lights) light.intensity = 0;
+      const night = brightness(rendererState.view);
+      const nearby = lights.find(light => light.position.x === -1.5 && light.position.z === 3.5);
+      nearby.intensity = 18;
+      const torchlit = brightness(rendererState.view);
+      nearby.intensity = 0;
+      Date.now = () => 900000;
+      rendererState.render();
+      for (const child of others) child.visible = false;
+      scene.background = new THREE.Color(0);
+      const day = brightness(rendererState.view);
+      assert(torchlit > night * 1.1, "torchlight visibly brightens item drops");
+      assert(day > night * 1.1, "daylight visibly brightens item drops compared with night");
+      for (const child of others) child.visible = true;
+      scene.background = background;
+
+      camera.pos[0] = 200.5;
+      rendererState.render();
+      assert(!pointLights().some(light => light.position.z === 60.5),
+        "unloading a chunk removes its torch light");
+      camera.pos[0] = 0.5;
+      flush();
+      assert(pointLights().some(light => light.position.z === 60.5 && light.intensity > 0),
+        "reloading a chunk restores its torch light");
+      blockEdits.delete(blockKey(0, 100, 60));
+      flush();
+      assert(!pointLights().some(light => light.position.z === 60.5),
+        "removing a distant torch removes its light");
+    } finally {
+      Date.now = originalNow;
+      renderer.setRenderTarget(null);
+      target.dispose();
+    }
+    return failures;
+  }
+  document.getElementById("game").addEventListener("load", event => {
+    const result = document.getElementById("result");
+    try {
+      const failures = event.target.contentWindow.eval(`(${runTests.toString()})()`);
+      result.textContent = failures.length ? `FAIL\n${failures.join("\n")}` : "PASS";
+    } catch (error) {
+      result.textContent = `FAIL\n${error.stack}`;
+    }
+  });
+</script>
