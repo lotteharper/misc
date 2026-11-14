@@ -152,7 +152,7 @@ function createVoxelRenderer() {
       if (direction) {
         const [dx, dz] = direction;
         const sine = Math.sin(Math.PI / 6), cosine = Math.cos(Math.PI / 6);
-        const halfWidth = 0.045;
+        const halfWidth = 0.09;
         const offset = halfWidth * cosine;
         const baseX = x + 0.5 - dx * (0.5 - offset);
         const baseZ = z + 0.5 - dz * (0.5 - offset);
