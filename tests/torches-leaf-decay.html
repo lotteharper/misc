@@ -32,11 +32,11 @@
       for (let j = 0; j < values.length; j += 3) points.push([values[j], values[j + 1], values[j + 2]]);
       const along = point => dx * (point[0] - x) + dz * (point[2] - z);
       const across = point => -dz * (point[0] - x) + dx * (point[2] - z);
-      assert(Math.abs(Math.max(...points.map(across)) - Math.min(...points.map(across)) - 0.09) < 0.0001,
-        `torch ${i} is half as wide`);
+      assert(Math.abs(Math.max(...points.map(across)) - Math.min(...points.map(across)) - 0.18) < 0.0001,
+        `wall torch ${i} is twice as wide`);
       const depth = point => along(point) * Math.cos(Math.PI / 6) - point[1] * Math.sin(Math.PI / 6);
-      assert(Math.abs(Math.max(...points.map(depth)) - Math.min(...points.map(depth)) - 0.09) < 0.0001,
-        `torch ${i} is half as deep`);
+      assert(Math.abs(Math.max(...points.map(depth)) - Math.min(...points.map(depth)) - 0.18) < 0.0001,
+        `wall torch ${i} is twice as deep`);
       const wall = dx > 0 || dz > 0 ? 0 : -1;
       assert(Math.abs(Math.min(...points.map(along)) - wall) < 0.0001,
         `torch ${i} touches its supporting face`);
