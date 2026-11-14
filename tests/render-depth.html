@@ -100,6 +100,41 @@
     blockEdits.delete(key);
     flush();
 
+    blockEdits.set(key, { x, y, z, type: "chest", color: ITEM_DEFINITIONS.chest.color });
+    flush();
+    let chest = chunk(x, z).chests.find(entry => entry.block.y === y && entry.block.x === x);
+    assert(Boolean(chest), "chest has separate geometry");
+    assert(!isOpaqueCube(x, y, z), "chests do not hide neighboring block faces");
+    assert(chest.hinge.position.y === 0.75 && chest.hinge.rotation.x === 0,
+      "closed lid hinges at the seam near the top");
+    const front = new THREE.Vector3(0, 0, -1);
+    const hingePoint = new THREE.Vector3(0, 0, 0);
+    chest.hinge.updateWorldMatrix(true, false);
+    const closedFront = chest.hinge.localToWorld(front.clone());
+    const closedHinge = chest.hinge.localToWorld(hingePoint.clone());
+    setChestOpen(true, key);
+    flush();
+    assert(Math.abs(chest.hinge.rotation.x - Math.PI / 2) < 1e-10,
+      "opening the chest rotates its lid 90 degrees");
+    chest.hinge.updateWorldMatrix(true, false);
+    const openFront = chest.hinge.localToWorld(front.clone());
+    assert(openFront.y > closedFront.y + 0.99 &&
+      chest.hinge.localToWorld(hingePoint.clone()).distanceTo(closedHinge) < 1e-10,
+      "the lid swings upward around its back seam");
+    rendererState.invalidate(key);
+    flush();
+    chest = chunk(x, z).chests.find(entry => entry.block.y === y && entry.block.x === x);
+    assert(Math.abs(chest.hinge.rotation.x - Math.PI / 2) < 1e-10,
+      "an open lid stays open when its chunk is rebuilt");
+    setChestOpen(false);
+    flush();
+    assert(chest.hinge.rotation.x === 0, "closing the panel closes the lid");
+    const chestGroup = chest.group;
+    blockEdits.delete(key);
+    flush();
+    assert(!chestGroup.parent && !chunk(x, z).chests.some(entry => entry.block.y === y && entry.block.x === x),
+      "removing a chest removes its geometry");
+
     Date.now = () => 0;
     render();
     const night = rendererState.scene.children.find(light => light.isDirectionalLight).intensity;

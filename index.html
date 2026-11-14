@@ -1597,10 +1597,10 @@
         type === "sapling";
     }
 
-    // Doors are thin, so they do not hide the faces of neighboring blocks.
+    // Doors are thin and chest lids move, so neither hides neighboring faces.
     function isOpaqueCube(x, y, z) {
       const block = getBlock(x, y, z);
-      return block !== null && !isThinBlock(block);
+      return block !== null && blockType(block) !== "chest" && !isThinBlock(block);
     }
 
     addPlacedBlock(-3, terrainHeight(-3, 0), 0, "#d84838");

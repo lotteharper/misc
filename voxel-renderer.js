@@ -50,6 +50,11 @@ function createVoxelRenderer() {
     vertexColors: true, side: THREE.DoubleSide, shadowSide: THREE.FrontSide, emissive: 0x8b3c05
   });
   const doorMaterial = new THREE.MeshLambertMaterial({ color: ITEM_DEFINITIONS.door.color });
+  const chestMaterial = new THREE.MeshLambertMaterial({ color: ITEM_DEFINITIONS.chest.color });
+  const chestSeamMaterial = new THREE.MeshLambertMaterial({ color: 0x4c2b17 });
+  const chestBodyGeometry = new THREE.BoxGeometry(1, 0.73, 1);
+  const chestSeamGeometry = new THREE.BoxGeometry(1, 0.02, 1);
+  const chestLidGeometry = new THREE.BoxGeometry(1, 0.25, 1);
   const avatarBodyGeometry = new THREE.BoxGeometry(0.65, 0.85, 0.4);
   const avatarHeadGeometry = new THREE.BoxGeometry(0.42, 0.42, 0.42);
   const doorGeometry = new THREE.BoxGeometry(1, 1, DOOR_THICKNESS);
@@ -68,6 +73,7 @@ function createVoxelRenderer() {
   const dropMeshes = new Map();
   const dropTextures = new Map();
   const doorSwings = new Map();
+  const chestSwings = new Map();
   let band = null;
 
   const keyForChunk = (x, z) => `${x},${z}`;
@@ -93,6 +99,7 @@ function createVoxelRenderer() {
       mesh.geometry.dispose();
     }
     for (const door of chunk.doors) world.remove(door.mesh);
+    for (const chest of chunk.chests) world.remove(chest.group);
     chunks.delete(key);
   }
 
@@ -102,6 +109,7 @@ function createVoxelRenderer() {
       torch: { positions: [], normals: [], colors: [] }
     };
     const doors = [];
+    const chests = [];
     const torches = [];
     const startX = cx * CHUNK_SIZE;
     const startZ = cz * CHUNK_SIZE;
@@ -124,6 +132,24 @@ function createVoxelRenderer() {
     function addBlock(block) {
       const type = blockType(block);
       const { x, y, z } = block;
+      if (type === "chest") {
+        const group = new THREE.Group();
+        group.position.set(x, y, z);
+        const body = new THREE.Mesh(chestBodyGeometry, chestMaterial);
+        body.position.set(0.5, 0.365, 0.5);
+        const seam = new THREE.Mesh(chestSeamGeometry, chestSeamMaterial);
+        seam.position.set(0.5, 0.74, 0.5);
+        const hinge = new THREE.Group();
+        hinge.position.set(0.5, 0.75, 1);
+        const lid = new THREE.Mesh(chestLidGeometry, chestMaterial);
+        lid.position.set(0, 0.125, -0.5);
+        for (const mesh of [body, seam, lid]) mesh.castShadow = mesh.receiveShadow = true;
+        hinge.add(lid);
+        group.add(body, seam, hinge);
+        world.add(group);
+        chests.push({ block, group, hinge });
+        return;
+      }
       if (type === "door" && doorStateFromColor(block.color)) {
         const state = doorStateFromColor(block.color);
         if (!state.upper) {
@@ -244,7 +270,7 @@ function createVoxelRenderer() {
       world.add(mesh);
       meshes.push(mesh);
     }
-    chunks.set(keyForChunk(cx, cz), { meshes, doors, torches });
+    chunks.set(keyForChunk(cx, cz), { meshes, doors, chests, torches });
   }
 
   function updateDoors(dt) {
@@ -267,6 +293,22 @@ function createVoxelRenderer() {
       }
     }
     for (const key of doorSwings.keys()) if (!visible.has(key)) doorSwings.delete(key);
+  }
+
+  function updateChests(dt) {
+    const visible = new Set();
+    for (const chunk of chunks.values()) {
+      for (const { block, hinge } of chunk.chests) {
+        const key = blockKey(block.x, block.y, block.z);
+        visible.add(key);
+        const target = chestOpen && activeChestKey === key ? 1 : 0;
+        let value = chestSwings.get(key) || 0;
+        value += Math.max(-dt / DOOR_SWING_MS, Math.min(dt / DOOR_SWING_MS, target - value));
+        chestSwings.set(key, value);
+        hinge.rotation.x = value * Math.PI / 2;
+      }
+    }
+    for (const key of chestSwings.keys()) if (!visible.has(key)) chestSwings.delete(key);
   }
 
   function updateAvatars() {
@@ -502,6 +544,7 @@ function createVoxelRenderer() {
       view.position.y + Math.sin(pitch),
       view.position.z + Math.cos(yaw) * Math.cos(pitch));
     updateDoors(frameDeltaMs);
+    updateChests(frameDeltaMs);
     updateAvatars();
     updateArrowMeshes();
     updateDropMeshes();
