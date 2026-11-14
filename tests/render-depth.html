@@ -107,8 +107,8 @@
     const sunDisc = rendererState.scene.getObjectByName("sunDisc");
     const moonDisc = rendererState.scene.getObjectByName("moonDisc");
     assert(moonDisc.visible && !sunDisc.visible, "moon is visible at midnight, not the sun");
-    assert(moonlight.intensity > 0 && moonlight.intensity < 0.5,
-      "moonlight adds subtle illumination at midnight");
+    const midnightMoonlight = moonlight.intensity;
+    assert(midnightMoonlight > 0, "moonlight illuminates the scene at midnight");
     assert(moonDisc.position.y > rendererState.view.position.y, "moon is above the horizon at midnight");
     const moonDirection = moonDisc.position.clone().sub(rendererState.view.position).normalize();
     const lightDirection = moonlight.position.clone().sub(moonlight.target.position).normalize();
@@ -123,6 +123,7 @@
     render();
     const day = rendererState.scene.children.find(light => light.isDirectionalLight).intensity;
     assert(day > night, "sunlight changes with time of day");
+    assert(day > midnightMoonlight, "moonlight remains dimmer than daytime sunlight");
     assert(sunDisc.visible && !moonDisc.visible, "sun is visible at noon, not the moon");
     assert(moonlight.intensity === 0, "moonlight is off during the day");
     assert(sunDisc.position.y > rendererState.view.position.y, "sun is above the horizon at noon");

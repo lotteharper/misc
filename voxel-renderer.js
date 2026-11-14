@@ -416,15 +416,15 @@ function createVoxelRenderer() {
     const daylight = Math.max(0, Math.sin(angle));
     const moonAmount = Math.max(0, -Math.sin(angle));
     const twilight = Math.max(0, Math.min(1, (Math.sin(angle) + 0.15) / 0.3));
-    ambient.intensity = 0.28 + daylight * 0.4;
-    fill.intensity = 0.3 + daylight * 0.2;
-    sun.intensity = twilight * (0.25 + daylight * 1.55);
+    ambient.intensity = 0.4 + daylight * 0.5;
+    fill.intensity = 0.4 + daylight * 0.25;
+    sun.intensity = twilight * (0.35 + daylight * 1.75);
     sun.color.setHSL(0.09 + daylight * 0.04, 0.65 - daylight * 0.35, 0.68 + daylight * 0.25);
     sun.target.position.set(-camera.pos[0], camera.pos[1], camera.pos[2]);
     sun.position.set(-camera.pos[0] - Math.cos(angle) * 40,
       camera.pos[1] + Math.max(0.05, Math.sin(angle)) * 40,
       camera.pos[2] + 20);
-    moonlight.intensity = moonAmount * 0.32;
+    moonlight.intensity = moonAmount * 0.5;
     moonlight.target.position.copy(sun.target.position);
     moonlight.position.set(-camera.pos[0] + Math.cos(angle) * 40,
       camera.pos[1] + moonAmount * 40, camera.pos[2] - 20);
@@ -435,7 +435,7 @@ function createVoxelRenderer() {
     moonDisc.visible = Math.sin(angle) < 0;
     sunDisc.lookAt(view.position);
     moonDisc.lookAt(view.position);
-    const sky = new THREE.Color(0x101b34).lerp(new THREE.Color(0x9ec8eb), twilight * (0.35 + daylight * 0.65));
+    const sky = new THREE.Color(0x263957).lerp(new THREE.Color(0xadd5f2), twilight * (0.35 + daylight * 0.65));
     scene.background = sky;
     const minutes = Math.floor(phase * 24 * 60);
     timeOfDayElement.textContent = `${String(Math.floor(minutes / 60)).padStart(2, "0")}:` +
