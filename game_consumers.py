@@ -208,6 +208,7 @@ class WorldConsumer(AsyncWebsocketConsumer):
             return
 
         self.user_id = user.pk
+        self.username = user.username
         self.room = room
         self.room_group = f"world_{room}"
         self.last_position = None
@@ -242,6 +243,7 @@ class WorldConsumer(AsyncWebsocketConsumer):
                     "message": {
                         "type": "player_state",
                         "player_id": self.player_id,
+                        "username": self.username,
                         "position": state["position"],
                     },
                 },
@@ -329,6 +331,7 @@ class WorldConsumer(AsyncWebsocketConsumer):
                 "message": {
                     "type": "player_state",
                     "player_id": self.player_id,
+                    "username": self.username,
                     "position": position,
                 },
             },
@@ -700,7 +703,7 @@ class WorldConsumer(AsyncWebsocketConsumer):
             others = list(
                 WorldPlayer.objects.filter(room=self.room, is_online=True)
                 .exclude(pk=player.pk)
-                .values("player_id", "position")
+                .values("player_id", "position", "user__username")
             )
 
             position = None if created else clean_position(player.position)
@@ -711,7 +714,8 @@ class WorldConsumer(AsyncWebsocketConsumer):
                 "position": position,
                 "inventory": inventory if inventory is not None else EMPTY_INVENTORY,
                 "players": [
-                    {"id": str(row["player_id"]), "position": row["position"]}
+                    {"id": str(row["player_id"]), "position": row["position"],
+                     "username": row["user__username"]}
                     for row in others
                 ],
             }

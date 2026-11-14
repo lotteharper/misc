@@ -5,6 +5,7 @@
 function createVoxelRenderer() {
   const CHUNK_SIZE = 8;
   const CAVE_RENDER_BAND = 10;
+  const NAMETAG_RANGE = 16;
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.shadowMap.enabled = true;
@@ -274,6 +275,11 @@ function createVoxelRenderer() {
       if (!remotePlayers.has(id)) {
         world.remove(avatar.group);
         avatar.material.dispose();
+        if (avatar.nametag) {
+          scene.remove(avatar.nametag);
+          avatar.nametag.material.map.dispose();
+          avatar.nametag.material.dispose();
+        }
         avatars.delete(id);
       }
     }
@@ -295,6 +301,42 @@ function createVoxelRenderer() {
         avatars.set(id, avatar);
       }
       avatar.group.position.set(position.x, position.y, position.z);
+      const username = remotePlayerNames.get(id);
+      if (avatar.username !== username) {
+        if (avatar.nametag) {
+          scene.remove(avatar.nametag);
+          avatar.nametag.material.map.dispose();
+          avatar.nametag.material.dispose();
+          avatar.nametag = null;
+        }
+        avatar.username = username;
+        if (username) {
+          const image = document.createElement("canvas");
+          const context = image.getContext("2d");
+          context.font = "bold 32px sans-serif";
+          image.width = Math.min(1024, Math.ceil(context.measureText(username).width) + 24);
+          image.height = 48;
+          context.font = "bold 32px sans-serif";
+          context.textAlign = "center";
+          context.textBaseline = "middle";
+          context.fillStyle = "rgba(0, 0, 0, 0.65)";
+          context.fillRect(0, 0, image.width, image.height);
+          context.fillStyle = "#ffffff";
+          context.fillText(username, image.width / 2, image.height / 2, image.width - 24);
+          const texture = new THREE.CanvasTexture(image);
+          texture.colorSpace = THREE.SRGBColorSpace;
+          avatar.nametag = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: texture, transparent: true, depthWrite: false, toneMapped: false
+          }));
+          avatar.nametag.scale.set(image.width / image.height * 0.35, 0.35, 1);
+          scene.add(avatar.nametag);
+        }
+      }
+      if (avatar.nametag) {
+        avatar.nametag.position.set(-position.x, position.y + 1.95, position.z);
+        avatar.nametag.visible = Math.hypot(position.x - camera.pos[0],
+          position.y - camera.pos[1], position.z - camera.pos[2]) <= NAMETAG_RANGE;
+      }
     }
   }
 

@@ -4,7 +4,7 @@ import json
 import sys
 import types
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 def load_consumers():
@@ -56,6 +56,51 @@ class WorldConsumerTests(unittest.IsolatedAsyncioTestCase):
         inventory[2] = {"type": "diamond_sword", "color": "#6cf0f2", "count": 1}
         inventory[3] = {"type": "apple", "color": "#d83930", "count": 3}
         self.assertEqual(consumers.clean_inventory(inventory), inventory)
+
+    async def test_authenticated_username_is_broadcast_on_connect_and_movement(self):
+        self.consumer.scope = {
+            "user": types.SimpleNamespace(pk=1, username="Alice", is_authenticated=True),
+            "url_route": {"kwargs": {"room": "lobby"}},
+        }
+        self.consumer.channel_name = "test-channel"
+        self.consumer.channel_layer.group_add = AsyncMock()
+        self.consumer.accept = AsyncMock()
+        position = {"x": 1, "y": 2, "z": 3, "yaw": 0, "pitch": 0}
+        self.consumer.load_player_state = AsyncMock(return_value={
+            "player_id": PLAYER_ID, "position": position, "inventory": [], "players": [],
+        })
+        for name in ("clear_stale_arrows", "load_room_edits", "load_room_containers",
+                     "load_landed_arrows", "load_drops"):
+            setattr(self.consumer, name, AsyncMock(return_value=[]))
+        await self.consumer.connect()
+        self.assertEqual(self.consumer.channel_layer.group_send.await_args.args[1]["message"], {
+            "type": "player_state", "player_id": PLAYER_ID,
+            "username": "Alice", "position": position,
+        })
+        self.consumer.save_position = AsyncMock()
+        await self.consumer.receive(json.dumps({
+            "type": "position", "position": position, "username": "Impostor",
+        }))
+        self.assertEqual(self.consumer.channel_layer.group_send.await_args.args[1]["message"]["username"],
+                         "Alice")
+
+    async def test_welcome_snapshot_contains_other_usernames(self):
+        player = types.SimpleNamespace(pk=1, player_id=PLAYER_ID, position={},
+                                       inventory=[None] * 27, save=MagicMock())
+        manager = MagicMock()
+        manager.get_or_create.return_value = (player, True)
+        manager.filter.return_value.exclude.return_value.values.return_value = [{
+            "player_id": TARGET_ID, "position": {"x": 1, "y": 2, "z": 3},
+            "user__username": "Bob",
+        }]
+        self.consumer.user_id = 1
+        with patch.object(consumers.WorldPlayer, "objects", manager, create=True):
+            state = await self.consumer.load_player_state()
+        self.assertEqual(state["players"], [{
+            "id": TARGET_ID, "position": {"x": 1, "y": 2, "z": 3}, "username": "Bob",
+        }])
+        manager.filter.return_value.exclude.return_value.values.assert_called_once_with(
+            "player_id", "position", "user__username")
 
     async def test_combat_is_targeted_and_validated(self):
         self.consumer.player_is_online = AsyncMock(return_value=True)
