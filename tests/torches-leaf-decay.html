@@ -20,6 +20,8 @@
       blockEdits.set(blockKey(x, y - 1, z), null);
       blockEdits.set(blockKey(x, y, z), { x, y, z, color, type: "torch" });
     }
+    blockEdits.set(blockKey(92, 104, 100),
+      { x: 92, y: 104, z: 100, color: ITEM_DEFINITIONS.torch.color, type: "torch" });
     for (let i = 0; i < 80; i++) rendererState.render();
     for (const [i, [dx, dz]] of TORCH_DIRECTIONS.entries()) {
       const x = 96 + i * 8, y = 104, z = 100;
@@ -29,6 +31,12 @@
       const points = [];
       for (let j = 0; j < values.length; j += 3) points.push([values[j], values[j + 1], values[j + 2]]);
       const along = point => dx * (point[0] - x) + dz * (point[2] - z);
+      const across = point => -dz * (point[0] - x) + dx * (point[2] - z);
+      assert(Math.abs(Math.max(...points.map(across)) - Math.min(...points.map(across)) - 0.09) < 0.0001,
+        `torch ${i} is half as wide`);
+      const depth = point => along(point) * Math.cos(Math.PI / 6) - point[1] * Math.sin(Math.PI / 6);
+      assert(Math.abs(Math.max(...points.map(depth)) - Math.min(...points.map(depth)) - 0.09) < 0.0001,
+        `torch ${i} is half as deep`);
       const wall = dx > 0 || dz > 0 ? 0 : -1;
       assert(Math.abs(Math.min(...points.map(along)) - wall) < 0.0001,
         `torch ${i} touches its supporting face`);
@@ -48,6 +56,14 @@
     }
     assert(torchColorForFace([0, 0, 0], [0, 1, 0]) === ITEM_DEFINITIONS.torch.color,
       "floor torches remain upright");
+    const floorChunk = rendererState.chunks.get("11,12");
+    const floorMesh = floorChunk.meshes.find(mesh => mesh.material.emissive.getHex() === 0x8b3c05);
+    const floorPoints = floorMesh.geometry.attributes.position.array;
+    for (const axis of [0, 2]) {
+      const coordinates = Array.from(floorPoints).filter((_, i) => i % 3 === axis);
+      assert(Math.abs(Math.max(...coordinates) - Math.min(...coordinates) - 0.25) < 0.0001,
+        "upright torch is half as wide");
+    }
 
     const x = 100, z = 100, y = 105;
     for (let by = 98; by <= y; by++) blockEdits.set(blockKey(x, by, z), null);

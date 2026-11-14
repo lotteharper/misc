@@ -152,7 +152,8 @@ function createVoxelRenderer() {
       if (direction) {
         const [dx, dz] = direction;
         const sine = Math.sin(Math.PI / 6), cosine = Math.cos(Math.PI / 6);
-        const offset = 0.09 * cosine;
+        const halfWidth = 0.045;
+        const offset = halfWidth * cosine;
         const baseX = x + 0.5 - dx * (0.5 - offset);
         const baseZ = z + 0.5 - dz * (0.5 - offset);
         const transform = (u, v, w, point) => {
@@ -162,12 +163,12 @@ function createVoxelRenderer() {
             dz * along + dx * w + (point ? baseZ : 0)];
         };
         const faces = [
-          [[0, 0, -1], [[-0.09, 0, -0.09], [0.09, 0, -0.09], [0.09, 0.72, -0.09], [-0.09, 0.72, -0.09]]],
-          [[0, 0, 1], [[0.09, 0, 0.09], [-0.09, 0, 0.09], [-0.09, 0.72, 0.09], [0.09, 0.72, 0.09]]],
-          [[0, -1, 0], [[-0.09, 0, 0.09], [0.09, 0, 0.09], [0.09, 0, -0.09], [-0.09, 0, -0.09]]],
-          [[0, 1, 0], [[-0.09, 0.72, -0.09], [0.09, 0.72, -0.09], [0.09, 0.72, 0.09], [-0.09, 0.72, 0.09]]],
-          [[-1, 0, 0], [[-0.09, 0, 0.09], [-0.09, 0, -0.09], [-0.09, 0.72, -0.09], [-0.09, 0.72, 0.09]]],
-          [[1, 0, 0], [[0.09, 0, -0.09], [0.09, 0, 0.09], [0.09, 0.72, 0.09], [0.09, 0.72, -0.09]]]
+          [[0, 0, -1], [[-halfWidth, 0, -halfWidth], [halfWidth, 0, -halfWidth], [halfWidth, 0.72, -halfWidth], [-halfWidth, 0.72, -halfWidth]]],
+          [[0, 0, 1], [[halfWidth, 0, halfWidth], [-halfWidth, 0, halfWidth], [-halfWidth, 0.72, halfWidth], [halfWidth, 0.72, halfWidth]]],
+          [[0, -1, 0], [[-halfWidth, 0, halfWidth], [halfWidth, 0, halfWidth], [halfWidth, 0, -halfWidth], [-halfWidth, 0, -halfWidth]]],
+          [[0, 1, 0], [[-halfWidth, 0.72, -halfWidth], [halfWidth, 0.72, -halfWidth], [halfWidth, 0.72, halfWidth], [-halfWidth, 0.72, halfWidth]]],
+          [[-1, 0, 0], [[-halfWidth, 0, halfWidth], [-halfWidth, 0, -halfWidth], [-halfWidth, 0.72, -halfWidth], [-halfWidth, 0.72, halfWidth]]],
+          [[1, 0, 0], [[halfWidth, 0, -halfWidth], [halfWidth, 0, halfWidth], [halfWidth, 0.72, halfWidth], [halfWidth, 0.72, -halfWidth]]]
         ];
         for (const [normal, points] of faces) {
           quad(arrays.torch, points.map(p => transform(...p, true)),
@@ -180,10 +181,11 @@ function createVoxelRenderer() {
       const thin = type === "fence" || type === "torch";
       if (type === "torch") torches.push([x + 0.5, y + 0.7, z + 0.5]);
       const target = type === "torch" ? arrays.torch : arrays.terrain;
-      const minX = x + (thin ? 0.25 : 0);
-      const maxX = x + (thin ? 0.75 : 1);
-      const minZ = z + (thin ? 0.25 : 0);
-      const maxZ = z + (thin ? 0.75 : 1);
+      const inset = type === "torch" ? 0.375 : thin ? 0.25 : 0;
+      const minX = x + inset;
+      const maxX = x + 1 - inset;
+      const minZ = z + inset;
+      const maxZ = z + 1 - inset;
       const faces = [
         [[0, 0, -1], [[minX, y, minZ], [maxX, y, minZ], [maxX, y + 1, minZ], [minX, y + 1, minZ]]],
         [[0, 0, 1], [[maxX, y, maxZ], [minX, y, maxZ], [minX, y + 1, maxZ], [maxX, y + 1, maxZ]]],
