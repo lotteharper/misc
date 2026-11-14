@@ -56,6 +56,39 @@
       for (const child of hidden) child.visible = true;
       scene.background = background;
 
+      const visibility = scene.children.map(child => [child, child.visible]);
+      for (const [child] of visibility) {
+        if (!child.isLight || child.isPointLight) child.visible = false;
+      }
+      const sample = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2),
+        new THREE.MeshLambertMaterial({ color: 0x888888 }));
+      sample.position.set(0, 100, 0);
+      scene.add(sample);
+      const sampleView = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+      sampleView.position.set(4, 103, 5);
+      sampleView.lookAt(sample.position);
+      for (const [time, minimum, label] of [
+        [0, 90000, "night"], [450000, 85000, "dawn"],
+        [900000, 290000, "day"], [1350000, 90000, "dusk"]
+      ]) {
+        Date.now = () => time;
+        rendererState.render();
+        if (time === 0) {
+          const oldNightSky = new THREE.Color(0x101b34);
+          assert(scene.background.r + scene.background.g + scene.background.b >
+            oldNightSky.r + oldNightSky.g + oldNightSky.b, "night sky is lighter");
+        }
+        scene.background = new THREE.Color(0);
+        assert(brightness(sampleView) > minimum, `${label} naturally illuminates the scene`);
+      }
+      scene.remove(sample);
+      sample.geometry.dispose();
+      sample.material.dispose();
+      for (const [child, visible] of visibility) child.visible = visible;
+      scene.background = background;
+      Date.now = () => 0;
+      rendererState.render();
+
       const drop = makeDrop("apple", [0.5, 101.62, 4.5], 101.62);
       drops.push(drop);
       rendererState.render();
