@@ -1646,6 +1646,7 @@
     const pendingContainerUpdates = new Map();
     const keys = Object.create(null);
     const remotePlayers = new Map();
+    const remotePlayerNames = new Map();
     const pendingWorldEdits = new Map();
     const arrows = [];
     const drops = [];
@@ -2792,6 +2793,12 @@
       sendWorldEdit(x, y, z, null);
     }
 
+    function setRemotePlayer(id, position, username) {
+      if (id === localPlayerId || !position) return;
+      remotePlayers.set(id, position);
+      if (typeof username === "string") remotePlayerNames.set(id, username);
+    }
+
     function applyWelcome(message) {
       localPlayerId = message.player_id;
       if (pendingDropPickup) {
@@ -2817,6 +2824,7 @@
         pendingArrowPickup = null;
       }
       remotePlayers.clear();
+      remotePlayerNames.clear();
       for (let i = arrows.length - 1; i >= 0; i--) {
         if (arrows[i].networked) arrows.splice(i, 1);
       }
@@ -2831,9 +2839,7 @@
       }
 
       for (const player of message.players || []) {
-        if (player.id !== localPlayerId && player.position) {
-          remotePlayers.set(player.id, player.position);
-        }
+        setRemotePlayer(player.id, player.position, player.username);
       }
 
       const saved = message.position;
@@ -2917,14 +2923,13 @@
         }
 
         if (message.type === "player_state") {
-          if (message.player_id !== localPlayerId && message.position) {
-            remotePlayers.set(message.player_id, message.position);
-          }
+          setRemotePlayer(message.player_id, message.position, message.username);
           return;
         }
 
         if (message.type === "player_left") {
           remotePlayers.delete(message.player_id);
+          remotePlayerNames.delete(message.player_id);
           return;
         }
 
@@ -4454,14 +4459,13 @@
         }
 
         if (message.type === "player_state") {
-          if (message.player_id !== localPlayerId && message.position) {
-            remotePlayers.set(message.player_id, message.position);
-          }
+          setRemotePlayer(message.player_id, message.position, message.username);
           return;
         }
 
         if (message.type === "player_left") {
           remotePlayers.delete(message.player_id);
+          remotePlayerNames.delete(message.player_id);
           return;
         }
 

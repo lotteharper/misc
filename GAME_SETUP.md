@@ -7,6 +7,9 @@ migration for its app label (`python manage.py makemigrations <app_label>` and
 `python manage.py migrate`). The new `WorldDrop` table persists uncollected
 saplings and apples; it must exist before deploying the updated consumer.
 
+Nearby players display their authenticated usernames above their avatars within
+16 blocks. The updated consumer supplies names to both existing and joining players.
+
 Leaf decay runs near active players. Unsupported leaves disappear gradually and
 drop saplings and apples as they decay. An intact tree canopy yields at least
 three saplings and apples; drops fall from the leaves and remain on the ground

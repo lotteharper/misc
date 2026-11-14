@@ -1,0 +1,85 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Player nametag tests</title>
+<pre id="result">Running...</pre>
+<iframe id="game" src="../index.html" width="320" height="240"></iframe>
+<script>
+  function runTests() {
+    const failures = [];
+    const assert = (condition, message) => { if (!condition) failures.push(message); };
+    const originalSocket = window.WebSocket;
+    const originalFillText = CanvasRenderingContext2D.prototype.fillText;
+    const drawnNames = [];
+    CanvasRenderingContext2D.prototype.fillText = function(text, ...args) {
+      drawnNames.push(text);
+      return originalFillText.call(this, text, ...args);
+    };
+    class TestSocket {
+      static OPEN = 1;
+      constructor() { this.readyState = 1; this.listeners = {}; }
+      addEventListener(type, handler) { this.listeners[type] = handler; }
+      send() {}
+      receive(message) { this.listeners.message({ data: JSON.stringify(message) }); }
+    }
+    window.WebSocket = TestSocket;
+    try {
+      connectWorldSocket();
+      const position = (x, y, z) => ({ x, y, z, yaw: 0, pitch: 0 });
+      camera.pos = [0, 100, 0];
+      worldSocket.receive({
+        type: "welcome", player_id: "self",
+        players: [
+          { id: "alice", username: "Alice", position: position(0, 100, 5) },
+          { id: "bob", username: "<Bob>", position: position(16, 100, 0) }
+        ], edits: [], containers: [], inventory: Array(27).fill(null)
+      });
+      rendererState.render();
+      const tags = () => rendererState.scene.children.filter(child => child.isSprite);
+      assert(tags().length === 2 && drawnNames.includes("Alice") && drawnNames.includes("<Bob>"),
+        "snapshot creates a literal nametag for each player");
+      const alice = tags().find(tag => tag.position.z === 5);
+      const bob = tags().find(tag => tag.position.x === -16);
+      assert(alice.visible && bob.visible && alice.position.y === 101.95,
+        "nametags appear above heads up to and including 16 blocks");
+      assert(alice.material.depthTest, "terrain can occlude nametags");
+      worldSocket.receive({ type: "player_state", player_id: "carol",
+        username: "Carol", position: position(3, 100, 4) });
+      rendererState.render();
+      assert(tags().length === 3 && drawnNames.includes("Carol"),
+        "a newly joined player gets a nametag");
+      worldSocket.receive({ type: "player_left", player_id: "carol" });
+      rendererState.render();
+      worldSocket.receive({ type: "player_state", player_id: "alice",
+        username: "Alicia", position: position(0, 100, 17) });
+      rendererState.render();
+      assert(!tags().find(tag => tag.position.z === 17).visible && drawnNames.includes("Alicia"),
+        "movement and name changes update the tag and hide it beyond range");
+      camera.pos[2] = 2;
+      rendererState.render();
+      assert(tags().find(tag => tag.position.z === 17).visible, "approaching shows the tag again");
+      worldSocket.receive({ type: "player_left", player_id: "bob" });
+      rendererState.render();
+      assert(tags().length === 1 && !remotePlayerNames.has("bob"),
+        "leaving removes the tag and username");
+      worldSocket.receive({ type: "welcome", player_id: "self", players: [],
+        edits: [], containers: [], inventory: Array(27).fill(null) });
+      rendererState.render();
+      assert(tags().length === 0 && remotePlayerNames.size === 0,
+        "a new snapshot clears stale tags");
+    } finally {
+      window.WebSocket = originalSocket;
+      CanvasRenderingContext2D.prototype.fillText = originalFillText;
+    }
+    return failures;
+  }
+
+  document.getElementById("game").addEventListener("load", event => {
+    const result = document.getElementById("result");
+    try {
+      const failures = event.target.contentWindow.eval(`(${runTests.toString()})()`);
+      result.textContent = failures.length ? `FAIL\n${failures.join("\n")}` : "PASS";
+    } catch (error) {
+      result.textContent = `FAIL\n${error.stack}`;
+    }
+  });
+</script>
