@@ -193,7 +193,12 @@ def clean_container_data(kind, value):
         }
 
     return None
+    
+from asgiref.sync import sync_to_async
 
+@sync_to_async
+def get_name(user_id):
+    return User.objects.get(id=user_id).profile.name
 
 class WorldConsumer(AsyncWebsocketConsumer):
     async def connect(self):
@@ -209,7 +214,7 @@ class WorldConsumer(AsyncWebsocketConsumer):
             return
 
         self.user_id = user.pk
-        self.username = user.username
+        self.username = await get_name(self.user_id)
         self.room = room
         self.room_group = f"world_{room}"
         self.last_position = None
