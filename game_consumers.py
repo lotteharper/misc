@@ -194,6 +194,13 @@ def clean_container_data(kind, value):
 
     return None
 
+from asgiref.sync import sync_to_async
+
+@sync_to_async
+def get_name(user_id):
+    from django.contrib.auth.models import User
+    return User.objects.get(id=user_id).profile.name
+
 
 class WorldConsumer(AsyncWebsocketConsumer):
     async def connect(self):
@@ -209,7 +216,7 @@ class WorldConsumer(AsyncWebsocketConsumer):
             return
 
         self.user_id = user.pk
-        self.username = user.username
+        self.username = await get_name(self.user_id)
         self.room = room
         self.room_group = f"world_{room}"
         self.last_position = None
@@ -704,7 +711,7 @@ class WorldConsumer(AsyncWebsocketConsumer):
             others = list(
                 WorldPlayer.objects.filter(room=self.room, is_online=True)
                 .exclude(pk=player.pk)
-                .values("player_id", "position", "user__username")
+                .values("player_id", "position", "user__profile__name")
             )
 
             position = None if created else clean_position(player.position)
@@ -716,7 +723,7 @@ class WorldConsumer(AsyncWebsocketConsumer):
                 "inventory": inventory if inventory is not None else EMPTY_INVENTORY,
                 "players": [
                     {"id": str(row["player_id"]), "position": row["position"],
-                     "username": row["user__username"]}
+                     "username": row["user__profile__name"]}
                     for row in others
                 ],
             }
