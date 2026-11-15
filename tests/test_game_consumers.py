@@ -55,7 +55,13 @@ class WorldConsumerTests(unittest.IsolatedAsyncioTestCase):
         inventory[1] = {"type": "arrows", "color": "#d5d5d5", "count": 4}
         inventory[2] = {"type": "diamond_sword", "color": "#6cf0f2", "count": 1}
         inventory[3] = {"type": "apple", "color": "#d83930", "count": 3}
+        inventory[4] = {"type": "wood_slab", "color": "#b98240", "count": 2}
+        inventory[5] = {"type": "stone_slab", "color": "#777b80", "count": 2}
+        inventory[6] = {"type": "wood_stairs", "color": "#b98250", "count": 4}
+        inventory[7] = {"type": "stone_stairs", "color": "#777b90", "count": 4}
         self.assertEqual(consumers.clean_inventory(inventory), inventory)
+        for item in inventory[4:8]:
+            self.assertEqual(consumers.clean_item(item), item)
 
     async def test_authenticated_username_is_broadcast_on_connect_and_movement(self):
         self.consumer.scope = {

@@ -174,6 +174,25 @@ function createVoxelRenderer() {
         return;
       }
 
+      if (isPartialBlock(type)) {
+        const color = ITEM_DEFINITIONS[type.startsWith("wood_") ? "planks" : "stone"].color;
+        for (const [index, box] of blockBoxes(block).entries()) {
+          const { minX, maxX, minY, maxY, minZ, maxZ } = box;
+          const faces = [
+            [[0, 0, -1], [[minX, minY, minZ], [maxX, minY, minZ], [maxX, maxY, minZ], [minX, maxY, minZ]]],
+            [[0, 0, 1], [[maxX, minY, maxZ], [minX, minY, maxZ], [minX, maxY, maxZ], [maxX, maxY, maxZ]]],
+            [[0, 1, 0], [[minX, maxY, minZ], [maxX, maxY, minZ], [maxX, maxY, maxZ], [minX, maxY, maxZ]]],
+            [[-1, 0, 0], [[minX, minY, maxZ], [minX, minY, minZ], [minX, maxY, minZ], [minX, maxY, maxZ]]],
+            [[1, 0, 0], [[maxX, minY, minZ], [maxX, minY, maxZ], [maxX, maxY, maxZ], [maxX, maxY, minZ]]]
+          ];
+          if (index === 0) faces.push(
+            [[0, -1, 0], [[minX, minY, maxZ], [maxX, minY, maxZ], [maxX, minY, minZ], [minX, minY, minZ]]]
+          );
+          for (const [normal, points] of faces) quad(arrays.terrain, points, normal, color);
+        }
+        return;
+      }
+
       const direction = type === "torch" ? torchDirection(block.color) : null;
       if (direction) {
         const [dx, dz] = direction;

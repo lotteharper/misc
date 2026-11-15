@@ -22,6 +22,7 @@ ITEM_PICKUP_RANGE = 5
 # Keep these item type names in sync with the game's JavaScript.
 ITEM_TYPES = {
     "log", "planks", "sticks", "stone", "dirt", "leaves",
+    "wood_slab", "stone_slab", "wood_stairs", "stone_stairs",
     "coal", "iron_ore", "gold_ore", "crystal_ore",
     "iron_ingot", "gold_ingot", "crystal",
     "wood_pickaxe", "stone_pickaxe", "iron_pickaxe",

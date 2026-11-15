@@ -1,0 +1,162 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Slab and stair tests</title>
+<pre id="result">Running...</pre>
+<iframe id="game" src="../index.html" width="320" height="240"></iframe>
+<script>
+  function runTests() {
+    const failures = [];
+    const assert = (condition, message) => { if (!condition) failures.push(message); };
+    hasLoadedServerState = false;
+    inventoryOpen = false;
+    chestOpen = false;
+
+    for (const [material, ingredient] of [["wood", "planks"], ["stone", "stone"]]) {
+      for (const shape of ["slab", "stairs"]) {
+        const type = `${material}_${shape}`;
+        const recipe = CRAFTING_RECIPES.find(item => item.id === type);
+        inventory.fill(null);
+        inventory[0] = { type: ingredient, color: ITEM_DEFINITIONS[ingredient].color, count: 10 };
+        craftRecipe(recipe);
+        assert(countInventoryItem(type) === recipe.output.count, `${type} crafts`);
+        assert(countInventoryItem(ingredient) === 10 - recipe.ingredients[ingredient],
+          `${type} consumes materials`);
+        assert(itemTypeFromColor(ITEM_DEFINITIONS[type].color) === type, `${type} color round-trips`);
+      }
+    }
+
+    const y = 100;
+    const set = (x, z, type, facing = 0) => {
+      const color = shapeColor(type, facing);
+      blockEdits.set(blockKey(x, y, z), { x, y, z, type, color });
+    };
+    const shapeColor = (type, facing) => type.endsWith("_stairs")
+      ? ITEM_DEFINITIONS[type].color.slice(0, -1) + facing
+      : ITEM_DEFINITIONS[type].color;
+    for (const type of ["wood_slab", "stone_slab", "wood_stairs", "stone_stairs"]) {
+      for (let facing = 0; facing < 4; facing++) {
+        const x = 96 + facing * 8, z = 100;
+        set(x, z, type, facing);
+        const block = getBlock(x, y, z);
+        assert(itemTypeFromColor(block.color) === type, `${type} orientation ${facing} round-trips`);
+        const boxes = blockBoxes(block);
+        assert(boxes[0].maxY === y + 0.5, `${type} has a half-height base`);
+        if (type.endsWith("_stairs")) {
+          const high = [[x + 0.25, z + 0.25], [x + 0.75, z + 0.25],
+            [x + 0.25, z + 0.75], [x + 0.25, z + 0.25]][facing];
+          const low = [[x + 0.25, z + 0.75], [x + 0.25, z + 0.25],
+            [x + 0.25, z + 0.25], [x + 0.75, z + 0.25]][facing];
+          assert(columnSupportHeight(...high, y + 0.5) === y + 1, `${type} ${facing} high support`);
+          assert(columnSupportHeight(...low, y + 0.5) === y + 0.5, `${type} ${facing} low support`);
+          assert(!rayHitsBox([low[0], y + 0.75, low[1]], [0, 0, 1], boxes[1], 0.1),
+            `${type} ${facing} cutout is empty`);
+        } else {
+          assert(!playerOverlapsBlock(x + 0.5, y + 0.5, z + 0.5, block),
+            `${type} empty upper half has no collision`);
+        }
+        assert(!isOpaqueCube(x, y, z), `${type} does not hide neighboring cube faces`);
+      }
+    }
+
+    // A ground -> slab -> stair -> full block path in both directions.
+    const z = 120;
+    for (let x = 110; x <= 115; x++) {
+      blockEdits.set(blockKey(x, y - 1, z), { x, y: y - 1, z, type: "stone", color: ITEM_DEFINITIONS.stone.color });
+    }
+    set(111, z, "wood_slab");
+    set(112, z, "stone_stairs", 1);
+    set(113, z, "stone");
+    camera.pos = [110.5, y, z + 0.5];
+    camera.grounded = true;
+    camera.velocityY = 0;
+    for (let i = 0; i < 600; i++) tryHorizontalMove(0.005, 0);
+    assert(Math.abs(camera.pos[0] - 113.5) < 1e-8 && camera.pos[1] === y + 1,
+      "walking up advances at full horizontal speed");
+    for (let i = 0; i < 600; i++) tryHorizontalMove(-0.005, 0);
+    assert(Math.abs(camera.pos[0] - 110.5) < 1e-8 && camera.pos[1] === y && camera.grounded,
+      "walking down advances at full horizontal speed without falling");
+    camera.rot = [0, Math.PI / 2];
+    keys.KeyW = true;
+    for (let i = 0; i < 60; i++) updatePhysics(0.01);
+    keys.KeyW = false;
+    assert(Math.abs(camera.pos[0] - 113.5) < 1e-8 && camera.pos[1] === y + 1,
+      "physics maintains normal walking speed up the path");
+    keys.KeyS = true;
+    for (let i = 0; i < 60; i++) updatePhysics(0.01);
+    keys.KeyS = false;
+    assert(Math.abs(camera.pos[0] - 110.5) < 1e-8 && camera.pos[1] === y && camera.grounded,
+      "physics maintains normal walking speed down the path");
+
+    camera.pos = [96.5, y - 0.85, 97];
+    camera.rot = [0, 0];
+    set(96, 99, "wood_slab");
+    set(96, 100, "stone");
+    assert(raycast()?.hit[2] === 100, "ray passes through slab's empty upper half");
+    assert(dropGroundPosition(96, y + 1, 99)[1] === y + 0.825,
+      "drops land on the slab surface");
+    arrows.length = 0;
+    arrows.push({ position: [96.5, y + 0.75, 98.8], velocity: [0, 0, 4],
+      direction: [0, 0, 1], owned: true, stuck: false, age: 0 });
+    updateArrows(0.1);
+    assert(!arrows[0].stuck && arrows[0].position[2] > 99,
+      "arrows pass through the slab's empty upper half");
+    arrows.length = 0;
+
+    const originalRaycast = raycast;
+    for (const [facing, yaw] of [[0, Math.PI], [1, Math.PI / 2], [2, 0], [3, -Math.PI / 2]]) {
+      inventory.fill(null);
+      inventory[0] = { type: "wood_stairs", color: ITEM_DEFINITIONS.wood_stairs.color, count: 1 };
+      selectedSlot = 0;
+      camera.pos = [130, y, 130];
+      camera.rot = [0, yaw];
+      raycast = () => ({ hit: [140, y - 1, 140], previous: [140, y, 140] });
+      blockEdits.set(blockKey(140, y, 140), null);
+      lastSuccessfulPlacementAt = -Infinity;
+      placeBlock();
+      const placed = getBlock(140, y, 140);
+      assert(placed?.color === shapeColor("wood_stairs", facing), `placement saves facing ${facing}`);
+      const savedColor = placed.color;
+      blockEdits.set(blockKey(140, y, 140), {
+        x: 140, y, z: 140, color: savedColor, type: itemTypeFromColor(savedColor)
+      });
+      assert(blockBoxes(getBlock(140, y, 140)).length === 2, `loaded facing ${facing} retains shape`);
+      raycast = () => ({ hit: [140, y, 140], previous: [140, y, 139] });
+      miningSources.add("test");
+      miningTargetKey = null;
+      updateMining(1000);
+      updateMining(3000);
+      assert(!getBlock(140, y, 140) && countInventoryItem("wood_stairs") === 1,
+        `placed facing ${facing} mines back into an item`);
+      stopMining();
+    }
+    raycast = originalRaycast;
+
+    set(96, 100, "stone_stairs", 0);
+    camera.pos = [96.5, y, 100.5];
+    for (let i = 0; i < 80; i++) rendererState.render();
+    const chunk = rendererState.chunks.get("12,12");
+    const terrain = chunk.meshes.find(mesh => mesh.material === rendererState.terrainMaterial) ||
+      chunk.meshes.find(mesh => !mesh.material.emissive.getHex());
+    const positions = terrain.geometry.attributes.position.array;
+    const topPoints = [];
+    for (let i = 0; i < positions.length; i += 3) {
+      if (positions[i] >= 96 && positions[i] <= 97 && positions[i + 2] >= 100 &&
+          positions[i + 2] <= 101 && positions[i + 1] === y + 1) {
+        topPoints.push([positions[i], positions[i + 2]]);
+      }
+    }
+    assert(topPoints.length > 0 && topPoints.every(point => point[1] <= 100.5),
+      "rendered stair upper tread occupies only its high half");
+
+    return failures;
+  }
+  document.getElementById("game").addEventListener("load", event => {
+    const result = document.getElementById("result");
+    try {
+      const failures = event.target.contentWindow.eval(`(${runTests.toString()})()`);
+      result.textContent = failures.length ? `FAIL\n${failures.join("\n")}` : "PASS";
+    } catch (error) {
+      result.textContent = `FAIL\n${error.stack}`;
+    }
+  });
+</script>
