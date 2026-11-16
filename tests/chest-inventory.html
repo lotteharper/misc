@@ -1,0 +1,70 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Chest inventory tests</title>
+<pre id="result">Running...</pre>
+<iframe id="game" src="../index.html" width="320" height="240"></iframe>
+<script>
+  function runTests() {
+    const failures = [];
+    const assert = (condition, message) => { if (!condition) failures.push(message); };
+    const stone = { type: "stone", color: ITEM_DEFINITIONS.stone.color, count: 4 };
+    const wood = { type: "log", color: ITEM_DEFINITIONS.log.color, count: 2 };
+    const chestItem = { type: "chest", color: ITEM_DEFINITIONS.chest.color, count: 1 };
+    inventory.fill(null);
+    inventory[0] = stone;
+    inventory[9] = wood;
+    selectedSlot = 0;
+    const key = "0,10,0";
+    const contents = Array.from({ length: 27 }, () => null);
+    contents[0] = chestItem;
+    chestContents.set(key, contents);
+    setChestOpen(true, key);
+
+    assert(chestGrid.children.length === 27 && chestInventoryGrid.children.length === 18 &&
+      chestHotbar.children.length === 9, "chest shows every chest and player slot");
+    assert(chestInventoryGrid.children[0].title.includes("Wood") &&
+      chestHotbar.children[0].title.includes("Stone"), "player items appear in their correct sections");
+    assert(chestHotbar.children[0].classList.contains("selected"), "selected hotbar slot is highlighted");
+    chestHotbar.children[1].click();
+    assert(selectedSlot === 1 && chestHotbar.children[1].classList.contains("selected"),
+      "player can select a hotbar slot in the chest");
+    chestInventoryGrid.children[0].click();
+    assert(inventory[1] === wood && inventory[9] === null &&
+      chestHotbar.children[1].title.includes("Wood"), "inventory item can be moved to the selected hotbar slot");
+    chestGrid.children[0].click();
+    assert(inventory[1] === chestItem && contents[0] === wood &&
+      chestHotbar.children[1].title.includes("Chest") && chestGrid.children[0].title.includes("Wood"),
+      "chest swaps update both visible inventories");
+    assert(pendingContainerUpdates.get(key).data.slots[0].type === "log",
+      "chest swaps are persisted");
+    inventory[10] = stone;
+    renderInventory();
+    assert(chestInventoryGrid.children[1].title.includes("Stone"),
+      "player inventory updates refresh the chest view");
+    setChestOpen(false);
+    setChestOpen(true, key);
+    assert(chestHotbar.children[1].title.includes("Chest") &&
+      chestInventoryGrid.children[1].title.includes("Stone"), "reopening shows current inventory");
+    const dataTransfer = new DataTransfer();
+    chestInventoryGrid.children[1].dispatchEvent(new DragEvent("dragstart", { dataTransfer }));
+    chestHotbar.children[1].dispatchEvent(new DragEvent("drop", { dataTransfer, cancelable: true }));
+    assert(inventory[1] === stone && inventory[10] === chestItem &&
+      chestInventoryGrid.children[1].title.includes("Chest"),
+      "dragging between player slots works in the chest");
+    assert(chestPanel.getBoundingClientRect().height <= window.innerHeight - 23 &&
+      chestPanel.scrollHeight > chestPanel.clientHeight &&
+      getComputedStyle(chestPanel).overflowY === "auto", "chest panel fits and scrolls on short screens");
+    setChestOpen(false);
+    return failures;
+  }
+
+  document.getElementById("game").addEventListener("load", event => {
+    const result = document.getElementById("result");
+    try {
+      const failures = event.target.contentWindow.eval(`(${runTests.toString()})()`);
+      result.textContent = failures.length ? `FAIL\n${failures.join("\n")}` : "PASS";
+    } catch (error) {
+      result.textContent = `FAIL\n${error.stack}`;
+    }
+  });
+</script>
