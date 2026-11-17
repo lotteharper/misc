@@ -18,5 +18,6 @@ toward the player and are collected when there is room in the inventory;
 apples can be eaten when health is below maximum.
 
 Wood planks and stone can be crafted into slabs and stairs. Stairs rise in the
-direction the player faces when placing them; slabs and stair steps can be
-walked up and down without jumping.
+direction the player faces when placing them and form outer corners when they
+meet perpendicular stairs. Slabs and stair steps can be walked up and down
+without jumping.

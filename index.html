@@ -1277,6 +1277,8 @@
         type === "wood_stairs" || type === "stone_stairs";
     }
 
+    const STAIR_DIRECTIONS = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+
     // Stairs rise in the direction the player faced when placing them.
     function blockBoxes(block) {
       const { x, y, z } = block;
@@ -1291,6 +1293,25 @@
         if (facing === 1) upper.minX = x + 0.5;
         if (facing === 2) upper.minZ = z + 0.5;
         if (facing === 3) upper.maxX = x + 0.5;
+
+        const [dx, dz] = STAIR_DIRECTIONS[facing];
+        const neighbor = getBlock(x + dx, y, z + dz);
+        if (isPartialBlock(blockType(neighbor)) && blockType(neighbor).endsWith("_stairs")) {
+          const neighborFacing = parseInt(neighbor.color.slice(-1), 16);
+          if ((facing + neighborFacing) % 2 === 1) {
+            const [sideX, sideZ] = STAIR_DIRECTIONS[neighborFacing];
+            const side = getBlock(x - sideX, y, z - sideZ);
+            const continues = isPartialBlock(blockType(side)) &&
+              blockType(side).endsWith("_stairs") &&
+              parseInt(side.color.slice(-1), 16) === facing;
+            if (!continues) {
+              if (sideX === 1) upper.minX = x + 0.5;
+              if (sideX === -1) upper.maxX = x + 0.5;
+              if (sideZ === 1) upper.minZ = z + 0.5;
+              if (sideZ === -1) upper.maxZ = z + 0.5;
+            }
+          }
+        }
         boxes.push(upper);
       }
       return boxes;

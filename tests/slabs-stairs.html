@@ -58,6 +58,47 @@
       }
     }
 
+    for (let facing = 0; facing < 4; facing++) {
+      for (const turn of [1, 3]) {
+        const x = 200 + facing * 10, z = 200 + turn * 10;
+        const [dx, dz] = STAIR_DIRECTIONS[facing];
+        const neighborFacing = (facing + turn) % 4;
+        const [sx, sz] = STAIR_DIRECTIONS[neighborFacing];
+        set(x, z, "wood_stairs", facing);
+        set(x + dx, z + dz, "stone_stairs", neighborFacing);
+        const block = getBlock(x, y, z);
+        let upper = blockBoxes(block)[1];
+        assert(upper.maxX - upper.minX === 0.5 && upper.maxZ - upper.minZ === 0.5,
+          `outer corner ${facing}/${turn} has a quarter upper step`);
+        const highX = x + 0.5 + (dx + sx) * 0.25;
+        const highZ = z + 0.5 + (dz + sz) * 0.25;
+        const cutX = x + 0.5 + (dx - sx) * 0.25;
+        const cutZ = z + 0.5 + (dz - sz) * 0.25;
+        assert(columnSupportHeight(highX, highZ, y + 0.5) === y + 1 &&
+          columnSupportHeight(cutX, cutZ, y + 0.5) === y + 0.5,
+        `outer corner ${facing}/${turn} has matching support heights`);
+        assert(!playerOverlapsBlock(x + 0.5 + dx * 0.25 - sx * 0.4, y + 0.5,
+          z + 0.5 + dz * 0.25 - sz * 0.4, block) &&
+          !rayHitsBox([cutX, y + 0.75, cutZ], [0, 1, 0], upper, 0.1),
+        `outer corner ${facing}/${turn} cutout has no collision or ray hit`);
+
+        set(x - sx, z - sz, "stone_stairs", facing);
+        upper = blockBoxes(block)[1];
+        assert((upper.maxX - upper.minX) * (upper.maxZ - upper.minZ) === 0.5,
+          `continuous stair row ${facing}/${turn} stays straight`);
+        blockEdits.set(blockKey(x - sx, y, z - sz), null);
+        set(x + dx, z + dz, "stone_stairs", facing);
+        upper = blockBoxes(block)[1];
+        assert((upper.maxX - upper.minX) * (upper.maxZ - upper.minZ) === 0.5,
+          `parallel neighbor ${facing}/${turn} stays straight`);
+        blockEdits.set(blockKey(x + dx, y, z + dz), null);
+        set(x - dx, z - dz, "stone_stairs", neighborFacing);
+        upper = blockBoxes(block)[1];
+        assert((upper.maxX - upper.minX) * (upper.maxZ - upper.minZ) === 0.5,
+          `neighbor behind stair ${facing}/${turn} does not create an outer corner`);
+      }
+    }
+
     // A ground -> slab -> stair -> full block path in both directions.
     const z = 120;
     for (let x = 110; x <= 115; x++) {
@@ -147,6 +188,32 @@
     }
     assert(topPoints.length > 0 && topPoints.every(point => point[1] <= 100.5),
       "rendered stair upper tread occupies only its high half");
+
+    // The corner and its neighbor straddle a chunk boundary.
+    set(159, 160, "wood_stairs", 1);
+    set(160, 160, "stone_stairs", 0);
+    camera.pos = [159.5, y, 160.5];
+    const renderedTreadArea = () => {
+      for (let i = 0; i < 80; i++) rendererState.render();
+      const mesh = rendererState.chunks.get("19,20").meshes
+        .find(item => !item.material.emissive.getHex());
+      const positions = mesh.geometry.attributes.position.array;
+      let area = 0;
+      for (let i = 0; i < positions.length; i += 9) {
+        const points = [0, 3, 6].map(offset => positions.slice(i + offset, i + offset + 3));
+        if (points.every(point => point[0] >= 159 && point[0] <= 160 &&
+            point[1] === y + 1 && point[2] >= 160 && point[2] <= 161)) {
+          area += Math.abs((points[1][0] - points[0][0]) * (points[2][2] - points[0][2]) -
+            (points[1][2] - points[0][2]) * (points[2][0] - points[0][0])) / 2;
+        }
+      }
+      return area;
+    };
+    assert(renderedTreadArea() === 0.25, "corner renders a quarter tread across chunk boundary");
+    blockEdits.set(blockKey(160, y, 160), null);
+    assert(renderedTreadArea() === 0.5, "removing neighbor rebuilds straight tread across chunk boundary");
+    set(160, 160, "stone_stairs", 0);
+    assert(renderedTreadArea() === 0.25, "replacing neighbor rebuilds corner across chunk boundary");
 
     return failures;
   }
