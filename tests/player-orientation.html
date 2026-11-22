@@ -1,0 +1,86 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Player orientation tests</title>
+<pre id="result">Running...</pre>
+<iframe id="game" src="../index.html" width="320" height="240"></iframe>
+<script>
+  function runTests() {
+    const failures = [];
+    const assert = (condition, message) => { if (!condition) failures.push(message); };
+    const originalSocket = window.WebSocket;
+    class TestSocket {
+      static OPEN = 1;
+      constructor() { this.readyState = 1; this.listeners = {}; this.sent = []; }
+      addEventListener(type, handler) { this.listeners[type] = handler; }
+      send(message) { this.sent.push(JSON.parse(message)); }
+      receive(message) { this.listeners.message({ data: JSON.stringify(message) }); }
+    }
+    window.WebSocket = TestSocket;
+    try {
+      connectWorldSocket();
+      frameDeltaMs = 16;
+      const position = (yaw, pitch) => ({ x: 2, y: 100, z: 5, yaw, pitch });
+      worldSocket.receive({
+        type: "welcome", player_id: "self",
+        players: [{ id: "other", position: position(Math.PI - 0.1, 0.3) }],
+        edits: [], containers: [], inventory: Array(27).fill(null)
+      });
+      rendererState.render();
+      const world = rendererState.scene.children.find(child => child.scale.x === -1);
+      const avatar = world.children.find(child =>
+        child.isGroup && child.position.x === 2 && child.position.y === 100 && child.position.z === 5);
+      const neck = avatar.children[1];
+      const head = neck.children[0];
+      assert(Math.abs(avatar.rotation.y - (Math.PI - 0.1)) < 1e-8 &&
+        Math.abs(neck.rotation.x + 0.3) < 1e-8, "snapshot initializes yaw and pitch");
+      assert(head.children.length === 2, "head has visible eyes facing forward");
+
+      worldSocket.receive({ type: "player_state", player_id: "other",
+        position: position(-Math.PI + 0.1, -0.5) });
+      rendererState.render();
+      assert(avatar.rotation.y > Math.PI - 0.1 && avatar.rotation.y < Math.PI + 0.1,
+        "yaw smoothly crosses the angle boundary by the shortest route");
+      assert(neck.rotation.x > -0.3 && neck.rotation.x < 0.5,
+        "head animates toward the new pitch");
+      frameDeltaMs = 100;
+      for (let i = 0; i < 15; i++) rendererState.render();
+      assert(Math.abs(avatar.rotation.y - (Math.PI + 0.1)) < 1e-5 &&
+        Math.abs(neck.rotation.x - 0.5) < 1e-5, "orientation reaches the received angles");
+
+      worldSocket.receive({ type: "player_state", player_id: "other",
+        position: position(Math.PI / 4, Math.PI / 4) });
+      for (let i = 0; i < 15; i++) rendererState.render();
+      rendererState.scene.updateMatrixWorld(true);
+      const center = head.getWorldPosition(new THREE.Vector3());
+      const eyes = head.children[0].getWorldPosition(new THREE.Vector3())
+        .add(head.children[1].getWorldPosition(new THREE.Vector3())).multiplyScalar(0.5);
+      const facing = eyes.sub(center);
+      assert(facing.x < 0 && facing.y > 0 && facing.z > 0,
+        "the visible face points in the same world direction as the camera when looking up");
+
+      camera.rot = [-0.4, 1.2];
+      syncPlayerPosition(lastNetworkUpdate + 50);
+      const sent = worldSocket.sent[worldSocket.sent.length - 1];
+      assert(sent.type === "position" && sent.position.yaw === 1.2 && sent.position.pitch === -0.4,
+        "local view orientation is sent even without movement");
+      worldSocket.receive({ type: "player_state", player_id: "other",
+        position: { x: 2, y: 100, z: 5 } });
+      for (let i = 0; i < 15; i++) rendererState.render();
+      assert(Number.isFinite(avatar.rotation.y) && Math.abs(neck.rotation.x) < 1e-5,
+        "legacy positions without orientation remain renderable");
+    } finally {
+      window.WebSocket = originalSocket;
+    }
+    return failures;
+  }
+
+  document.getElementById("game").addEventListener("load", event => {
+    const result = document.getElementById("result");
+    try {
+      const failures = event.target.contentWindow.eval(`(${runTests.toString()})()`);
+      result.textContent = failures.length ? `FAIL\n${failures.join("\n")}` : "PASS";
+    } catch (error) {
+      result.textContent = `FAIL\n${error.stack}`;
+    }
+  });
+</script>

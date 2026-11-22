@@ -8,7 +8,9 @@ migration for its app label (`python manage.py makemigrations <app_label>` and
 saplings and apples; it must exist before deploying the updated consumer.
 
 Nearby players display their authenticated usernames above their avatars within
-16 blocks. The updated consumer supplies names to both existing and joining players.
+16 blocks. Their bodies turn with their view direction, and their heads tilt as
+they look up or down. The consumer supplies names and orientation to both
+existing and joining players.
 
 Leaf decay runs near active players. Unsupported leaves disappear gradually and
 drop saplings and apples as they decay. An intact tree canopy yields at least
