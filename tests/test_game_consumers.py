@@ -1,7 +1,9 @@
+import asyncio
 import contextlib
 import importlib.util
 import json
 import sys
+import time
 import types
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -10,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 def load_consumers():
     names = ("channels", "channels.db", "channels.generic",
              "channels.generic.websocket", "django", "django.db",
-             "django.utils", "world", "world.models")
+             "django.db.models", "django.utils", "world", "world.models")
     modules = {name: types.ModuleType(name) for name in names}
 
     def database_sync_to_async(function):
@@ -23,8 +25,9 @@ def load_consumers():
         "AsyncWebsocketConsumer", (), {}
     )
     modules["django.db"].transaction = types.SimpleNamespace(atomic=contextlib.nullcontext)
+    modules["django.db.models"].Q = MagicMock()
     modules["django.utils"].timezone = types.SimpleNamespace(now=lambda: None)
-    for name in ("WorldArrow", "WorldBlockEdit", "WorldContainer", "WorldDrop", "WorldPlayer"):
+    for name in ("WorldArrow", "WorldBlockEdit", "WorldConnection", "WorldContainer", "WorldDrop", "WorldPlayer"):
         setattr(modules["world.models"], name, type(name, (), {}))
     spec = importlib.util.spec_from_file_location("world.game_consumers", "game_consumers.py")
     module = importlib.util.module_from_spec(spec)
@@ -46,6 +49,8 @@ class WorldConsumerTests(unittest.IsolatedAsyncioTestCase):
         self.consumer.room_group = "world_lobby"
         self.consumer.player_id = PLAYER_ID
         self.consumer.flying_arrows = set()
+        self.consumer.connection_claimed = True
+        self.consumer.lease_deadline = time.monotonic() + 60
         self.consumer.channel_layer = types.SimpleNamespace(group_send=AsyncMock())
         self.consumer.send_json = AsyncMock()
 
@@ -71,6 +76,7 @@ class WorldConsumerTests(unittest.IsolatedAsyncioTestCase):
         self.consumer.channel_name = "test-channel"
         self.consumer.channel_layer.group_add = AsyncMock()
         self.consumer.accept = AsyncMock()
+        self.consumer.claim_connection = AsyncMock(return_value=[])
         position = {"x": 1, "y": 2, "z": 3, "yaw": 0, "pitch": 0}
         self.consumer.load_player_state = AsyncMock(return_value={
             "player_id": PLAYER_ID, "position": position, "inventory": [], "players": [],
@@ -78,7 +84,8 @@ class WorldConsumerTests(unittest.IsolatedAsyncioTestCase):
         for name in ("clear_stale_arrows", "load_room_edits", "load_room_containers",
                      "load_landed_arrows", "load_drops"):
             setattr(self.consumer, name, AsyncMock(return_value=[]))
-        await self.consumer.connect()
+        with patch.object(consumers, "get_name", AsyncMock(return_value="Alice")):
+            await self.consumer.connect()
         self.assertEqual(self.consumer.channel_layer.group_send.await_args.args[1]["message"], {
             "type": "player_state", "player_id": PLAYER_ID,
             "username": "Alice", "position": position,
@@ -89,6 +96,52 @@ class WorldConsumerTests(unittest.IsolatedAsyncioTestCase):
         }))
         self.assertEqual(self.consumer.channel_layer.group_send.await_args.args[1]["message"]["username"],
                          "Alice")
+        self.consumer.lease_task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await self.consumer.lease_task
+
+    async def test_duplicate_connection_does_not_initialize_or_clean_up_player(self):
+        self.consumer = consumers.WorldConsumer()
+        self.consumer.scope = {
+            "user": types.SimpleNamespace(pk=1, is_authenticated=True),
+            "url_route": {"kwargs": {"room": "other-room"}},
+        }
+        self.consumer.claim_connection = AsyncMock(return_value=None)
+        self.consumer.accept = AsyncMock()
+        self.consumer.send_json = AsyncMock()
+        self.consumer.close = AsyncMock()
+        self.consumer.load_player_state = AsyncMock()
+        self.consumer.release_connection = AsyncMock()
+        await self.consumer.connect()
+        self.consumer.send_json.assert_awaited_once_with({"type": "connection_blocked"})
+        self.consumer.close.assert_awaited_once_with(code=4409)
+        self.consumer.load_player_state.assert_not_awaited()
+        await self.consumer.disconnect(4409)
+        self.consumer.release_connection.assert_not_awaited()
+
+    async def test_expired_connection_rejects_actions(self):
+        self.consumer.lease_deadline = time.monotonic() - 1
+        self.consumer.close = AsyncMock()
+        self.consumer.receive_position = AsyncMock()
+        await self.consumer.receive(json.dumps({"type": "position", "position": {}}))
+        self.consumer.receive_position.assert_not_awaited()
+        self.consumer.close.assert_awaited_once_with(code=4410)
+        await self.consumer.room_message({"message": {"type": "player_state"}})
+        self.consumer.send_json.assert_not_awaited()
+
+    async def test_startup_error_releases_connection(self):
+        self.consumer = consumers.WorldConsumer()
+        self.consumer.scope = {
+            "user": types.SimpleNamespace(pk=1, is_authenticated=True),
+            "url_route": {"kwargs": {"room": "lobby"}},
+        }
+        self.consumer.claim_connection = AsyncMock(return_value=[])
+        self.consumer.release_connection = AsyncMock(return_value=(True, []))
+        with patch.object(consumers, "get_name", AsyncMock(side_effect=RuntimeError("failed"))):
+            with self.assertRaisesRegex(RuntimeError, "failed"):
+                await self.consumer.connect()
+        self.consumer.release_connection.assert_awaited_once()
+        self.assertTrue(self.consumer.lease_task.cancelled())
 
     async def test_welcome_snapshot_contains_other_usernames(self):
         player = types.SimpleNamespace(pk=1, player_id=PLAYER_ID, position={},
@@ -97,7 +150,7 @@ class WorldConsumerTests(unittest.IsolatedAsyncioTestCase):
         manager.get_or_create.return_value = (player, True)
         manager.filter.return_value.exclude.return_value.values.return_value = [{
             "player_id": TARGET_ID, "position": {"x": 1, "y": 2, "z": 3},
-            "user__username": "Bob",
+            "user__profile__name": "Bob",
         }]
         self.consumer.user_id = 1
         with patch.object(consumers.WorldPlayer, "objects", manager, create=True):
@@ -106,7 +159,7 @@ class WorldConsumerTests(unittest.IsolatedAsyncioTestCase):
             "id": TARGET_ID, "position": {"x": 1, "y": 2, "z": 3}, "username": "Bob",
         }])
         manager.filter.return_value.exclude.return_value.values.assert_called_once_with(
-            "player_id", "position", "user__username")
+            "player_id", "position", "user__profile__name")
 
     async def test_combat_is_targeted_and_validated(self):
         self.consumer.player_is_online = AsyncMock(return_value=True)

@@ -74,6 +74,14 @@ class WorldPlayer(models.Model):
         return f"{self.user_id} in {self.room}"
 
 
+class WorldConnection(models.Model):
+    """Lease for the user's active game connection across all rooms."""
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    token = models.UUIDField(null=True)
+    expires_at = models.DateTimeField(null=True)
+
+
 class WorldArrow(models.Model):
     """A fired arrow, retained after landing until a player picks it up."""
 

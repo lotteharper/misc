@@ -1,0 +1,63 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Game connection tests</title>
+<pre id="result">Running...</pre>
+<iframe id="game" src="../index.html" width="320" height="240"></iframe>
+<script>
+  function runTests() {
+    const failures = [];
+    const assert = (condition, message) => { if (!condition) failures.push(message); };
+    const originalSocket = window.WebSocket;
+    let sockets = 0;
+    class TestSocket {
+      static OPEN = 1;
+      constructor() { sockets++; this.readyState = 1; this.listeners = {}; }
+      addEventListener(type, handler) { this.listeners[type] = handler; }
+      send() {}
+      receive(message) { this.listeners.message({ data: JSON.stringify(message) }); }
+      closeWith(code) { this.listeners.close({ code }); }
+    }
+    window.WebSocket = TestSocket;
+    try {
+      connectWorldSocket();
+      worldSocket.closeWith(4409);
+      assert(connectionBlocked && document.getElementById("connectionOverlay").textContent ===
+        "You are already connected on another device", "close code alone blocks the session");
+      connectionBlocked = false;
+      connectWorldSocket();
+      const socket = worldSocket;
+      socket.receive({
+        type: "welcome", player_id: "self", players: [], edits: [],
+        containers: [], inventory: Array(27).fill(null), arrows: [], drops: []
+      });
+      assert(hasLoadedServerState && document.getElementById("connectionOverlay").hidden,
+        "welcome enables the game");
+      socket.receive({ type: "connection_blocked" });
+      const overlay = document.getElementById("connectionOverlay");
+      assert(!overlay.hidden && overlay.textContent === "You are already connected on another device",
+        "duplicate connection displays the required message");
+      assert(!hasLoadedServerState && document.getElementById("touchControls").inert &&
+        document.getElementById("inventoryPanel").inert && document.getElementById("c").inert,
+        "blocked session disables the game and controls");
+      document.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyE", bubbles: true }));
+      assert(!inventoryOpen, "keyboard controls do not open the inventory");
+      socket.closeWith(4409);
+      connectWorldSocket();
+      socket.receive({ type: "welcome" });
+      assert(sockets === 2 && !hasLoadedServerState && !overlay.hidden,
+        "blocked session does not reconnect or accept a later welcome");
+    } finally {
+      window.WebSocket = originalSocket;
+    }
+    return failures;
+  }
+  document.getElementById("game").addEventListener("load", event => {
+    const result = document.getElementById("result");
+    try {
+      const failures = event.target.contentWindow.eval(`(${runTests.toString()})()`);
+      result.textContent = failures.length ? `FAIL\n${failures.join("\n")}` : "PASS";
+    } catch (error) {
+      result.textContent = `FAIL\n${error.stack}`;
+    }
+  });
+</script>
