@@ -6,6 +6,9 @@ import sys
 import tempfile
 import unittest
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
+from threading import Barrier
 
 
 HAS_DJANGO = importlib.util.find_spec("django") is not None
@@ -44,6 +47,7 @@ class ArrowDatabaseTests(unittest.TestCase):
         with connection.schema_editor() as editor:
             editor.create_model(cls.user_class)
             editor.create_model(cls.models.WorldPlayer)
+            editor.create_model(cls.models.WorldConnection)
             editor.create_model(cls.models.WorldArrow)
             editor.create_model(cls.models.WorldBlockEdit)
             editor.create_model(cls.models.WorldDrop)
@@ -61,14 +65,80 @@ class ArrowDatabaseTests(unittest.TestCase):
         self.models.WorldBlockEdit.objects.all().delete()
         self.models.WorldDrop.objects.all().delete()
         self.models.WorldPlayer.objects.all().delete()
+        self.models.WorldConnection.objects.all().delete()
         user = self.user_class.objects.create(username=str(uuid.uuid4()))
         self.player = self.models.WorldPlayer.objects.create(user=user, room="lobby")
         self.consumer = self.consumer_class()
         self.consumer.room = "lobby"
         self.consumer.user_id = user.pk
+        self.consumer.connection_token = uuid.uuid4()
         self.consumer.player_id = str(self.player.player_id)
         self.consumer.last_position = {"x": 1, "y": 2, "z": 3}
         self.arrow_id = "c9592f76-a6ee-43df-bffa-30f17dff2d68"
+
+    def test_connection_claim_release_and_expiry_are_owned(self):
+        from asgiref.sync import async_to_sync
+        from django.utils import timezone
+        claim = async_to_sync(self.consumer.claim_connection)
+        renew = async_to_sync(self.consumer.renew_connection)
+        release = async_to_sync(self.consumer.release_connection)
+        other = self.consumer_class()
+        other.user_id = self.consumer.user_id
+        other.room = "another-room"
+        other.connection_token = uuid.uuid4()
+        self.assertEqual(claim(), [])
+        self.assertIsNone(async_to_sync(other.claim_connection)())
+        self.assertTrue(renew())
+        self.models.WorldConnection.objects.filter(user_id=other.user_id).update(
+            expires_at=timezone.now() - timedelta(seconds=1))
+        self.assertEqual(async_to_sync(other.claim_connection)(), [])
+        self.assertFalse(renew())
+        self.assertEqual(release(), (False, []))
+        self.assertIsNone(claim())
+        self.assertEqual(async_to_sync(other.release_connection)(), (True, []))
+        self.assertEqual(claim(), [])
+
+    def test_simultaneous_connections_only_one_claims(self):
+        from asgiref.sync import async_to_sync
+        barrier = Barrier(2)
+
+        def claim():
+            consumer = self.consumer_class()
+            consumer.user_id = self.consumer.user_id
+            consumer.connection_token = uuid.uuid4()
+            barrier.wait()
+            return async_to_sync(consumer.claim_connection)()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(lambda _: claim(), range(2)))
+        self.assertEqual(sum(result is not None for result in results), 1)
+
+    def test_expired_session_cleanup_cannot_affect_new_connection(self):
+        from asgiref.sync import async_to_sync
+        from django.utils import timezone
+        self.assertEqual(async_to_sync(self.consumer.claim_connection)(), [])
+        self.player.is_online = True
+        self.player.save()
+        self.models.WorldArrow.objects.create(
+            arrow_id=self.arrow_id, room="lobby", owner_id=self.player.player_id,
+            position=[1, 2, 3], direction=[0, 0, 1], landed=False,
+        )
+        self.models.WorldConnection.objects.filter(user_id=self.consumer.user_id).update(
+            expires_at=timezone.now() - timedelta(seconds=1))
+        other = self.consumer_class()
+        other.user_id = self.consumer.user_id
+        other.room = "lobby"
+        other.connection_token = uuid.uuid4()
+        self.assertEqual(async_to_sync(other.claim_connection)(), [{
+            "room": "lobby", "player_id": str(self.player.player_id), "arrows": [self.arrow_id],
+        }])
+        self.player.refresh_from_db()
+        self.assertFalse(self.player.is_online)
+        self.player.is_online = True
+        self.player.save()
+        self.assertEqual(async_to_sync(self.consumer.release_connection)(), (False, []))
+        self.player.refresh_from_db()
+        self.assertTrue(self.player.is_online)
 
     def test_arrow_pickup_is_persisted_and_only_awarded_once(self):
         from asgiref.sync import async_to_sync

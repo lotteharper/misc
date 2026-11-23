@@ -6,6 +6,11 @@ After adding the updated models to the Django application, generate and apply a
 migration for its app label (`python manage.py makemigrations <app_label>` and
 `python manage.py migrate`). The new `WorldDrop` table persists uncollected
 saplings and apples; it must exist before deploying the updated consumer.
+The `WorldConnection` table also requires a migration. It enforces one active
+game connection per authenticated user across all rooms and server workers.
+Connections renew a 60-second lease every 15 seconds; after a server crash, a
+replacement connection can be made once the lease expires. All workers must
+share the same database and have synchronized clocks.
 
 Nearby players display their authenticated usernames above their avatars within
 16 blocks. Their bodies turn with their view direction, and their heads tilt as
